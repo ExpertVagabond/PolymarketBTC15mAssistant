@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BTC 15m Polymarket Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+    .header { padding: 16px 24px; background: #111118; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 18px; color: #fff; font-weight: 600; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #333; }
+    .dot.live { background: #00ff88; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 24px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: #13131a; border: 1px solid #222; border-radius: 8px; padding: 16px; }
+    .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 12px; }
+    .signal-box { text-align: center; padding: 20px; }
+    .signal-text { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+    .signal-text.buy-up { color: #00ff88; }
+    .signal-text.buy-down { color: #ff4444; }
+    .signal-text.no-trade { color: #666; }
+    .rec-detail { font-size: 13px; color: #888; }
+    .kv-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1a1a22; }
+    .kv-row:last-child { border-bottom: none; }
+    .kv-label { color: #777; font-size: 13px; }
+    .kv-value { font-size: 13px; font-weight: 500; }
+    .green { color: #00ff88; }
+    .red { color: #ff4444; }
+    .yellow { color: #ffaa00; }
+    .gray { color: #555; }
+    .chart-container { height: 160px; position: relative; }
+    .prob-bar { display: flex; height: 28px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+    .prob-up { background: #00ff8833; color: #00ff88; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+    .prob-down { background: #ff444433; color: #ff4444; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+    .wide { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>BTC 15m Polymarket</h1>
+    <div class="status">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card signal-box">
+      <div class="card-title">Signal</div>
+      <div class="signal-text no-trade" id="signalText">-</div>
+      <div class="rec-detail" id="recDetail">-</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Model Probability</div>
+      <div class="prob-bar">
+        <div class="prob-up" id="probUp" style="width:50%">UP 50%</div>
+        <div class="prob-down" id="probDown" style="width:50%">DOWN 50%</div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="kv-row"><span class="kv-label">Edge UP</span><span class="kv-value" id="edgeUp">-</span></div>
+        <div class="kv-row"><span class="kv-label">Edge DOWN</span><span class="kv-value" id="edgeDown">-</span></div>
+        <div class="kv-row"><span class="kv-label">Regime</span><span class="kv-value" id="regime">-</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Prices</div>
+      <div class="kv-row"><span class="kv-label">BTC (Binance)</span><span class="kv-value" id="btcPrice">-</span></div>
+      <div class="kv-row"><span class="kv-label">Current (Chainlink)</span><span class="kv-value" id="currentPrice">-</span></div>
+      <div class="kv-row"><span class="kv-label">Price to Beat</span><span class="kv-value" id="priceToBeat">-</span></div>
+      <div class="kv-row"><span class="kv-label">Delta 1m / 3m</span><span class="kv-value" id="deltas">-</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Indicators</div>
+      <div class="kv-row"><span class="kv-label">VWAP</span><span class="kv-value" id="vwap">-</span></div>
+      <div class="kv-row"><span class="kv-label">RSI</span><span class="kv-value" id="rsi">-</span></div>
+      <div class="kv-row"><span class="kv-label">MACD</span><span class="kv-value" id="macd">-</span></div>
+      <div class="kv-row"><span class="kv-label">Heiken Ashi</span><span class="kv-value" id="heiken">-</span></div>
+      <div class="kv-row"><span class="kv-label">Time Left</span><span class="kv-value" id="timeLeft">-</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Polymarket</div>
+      <div class="kv-row"><span class="kv-label">Market</span><span class="kv-value" id="marketSlug">-</span></div>
+      <div class="kv-row"><span class="kv-label">UP Price</span><span class="kv-value green" id="mktUp">-</span></div>
+      <div class="kv-row"><span class="kv-label">DOWN Price</span><span class="kv-value red" id="mktDown">-</span></div>
+      <div class="kv-row"><span class="kv-label">Liquidity</span><span class="kv-value" id="liquidity">-</span></div>
+    </div>
+
+    <div class="card wide">
+      <div class="card-title">BTC Price (last 60 ticks)</div>
+      <div class="chart-container"><canvas id="priceChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">RSI (last 60 ticks)</div>
+      <div class="chart-container"><canvas id="rsiChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Model Probability (last 60 ticks)</div>
+      <div class="chart-container"><canvas id="probChart"></canvas></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

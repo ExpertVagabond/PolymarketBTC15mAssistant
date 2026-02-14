@@ -4,10 +4,21 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "start:alerts": "node src/index-alerts.js",
+    "start:web": "node src/index-web.js",
+    "start:multi": "node src/index-multi.js",
+    "start:trading": "node src/index-trading.js",
+    "start:full": "node src/index-full.js",
+    "backtest": "node src/backtest/analyzer.js",
+    "mcp": "node src/mcp/server.js"
   },
   "dependencies": {
+    "@fastify/static": "^9.0.0",
+    "@fastify/websocket": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "ethers": "^6.11.1",
+    "fastify": "^5.7.4",
     "https-proxy-agent": "^7.0.6",
     "socks-proxy-agent": "^8.0.5",
     "undici": "^6.21.3",
