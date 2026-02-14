@@ -1,6 +1,6 @@
 # Polymarket BTC 15m Assistant
 
-A real-time console trading assistant for Polymarket **"Bitcoin Up or Down" 15-minute** markets.
+A real-time trading assistant for Polymarket **"Bitcoin Up or Down" 15-minute** markets.
 
 It combines:
 - Polymarket market selection + UP/DOWN prices + liquidity
@@ -8,196 +8,231 @@ It combines:
 - Fallback to on-chain Chainlink (Polygon) via HTTP/WSS RPC
 - Binance spot price for reference
 - Short-term TA snapshot (Heiken Ashi, RSI, MACD, VWAP, Delta 1/3m)
-- A simple live **Predict (LONG/SHORT %)** derived from the assistant’s current TA scoring
+- A simple live **Predict (LONG/SHORT %)** derived from the assistant's current TA scoring
 
-## Requirements
+## Features
+
+| Command | What it does |
+|---------|-------------|
+| `npm start` | Console dashboard — original live view |
+| `npm run start:web` | Web dashboard at http://localhost:3000 with real-time charts |
+| `npm run start:alerts` | Console + Telegram/Discord alerts on strong signals |
+| `npm run start:trading` | Auto-trading bot (dry-run by default) |
+| `npm run start:multi` | Multi-market tabular view |
+| `npm run start:full` | Everything: web + alerts + trading + backtest tracking |
+| `npm run backtest` | Analyze collected window data (accuracy, P&L, Sharpe) |
+| `npm run mcp` | MCP server for Claude Code / AI integration |
+
+## Quick Start
+
+```bash
+git clone https://github.com/FrondEnt/PolymarketBTC15mAssistant.git
+cd PolymarketBTC15mAssistant
+npm install
+npm start
+```
+
+**No API keys required** for the base app. All data sources are public.
+
+## Setup
+
+### Requirements
 
 - Node.js **18+** (https://nodejs.org/en)
 - npm (comes with Node)
 
+### Environment Variables
 
-## Run from terminal (step-by-step)
-
-### 1) Clone the repository
-
-```bash
-git clone https://github.com/FrondEnt/PolymarketBTC15mAssistant.git
-```
-
-Alternative (no git):
-
-- Click the green `<> Code` button on GitHub
-- Choose `Download ZIP`
-- Extract the ZIP
-- Open a terminal in the extracted project folder
-
-Then open a terminal in the project folder.
-
-### 2) Install dependencies
+Copy the example file and edit what you need:
 
 ```bash
-npm install
+cp .env.example .env
 ```
 
-### 3) (Optional) Set environment variables
+The base app works with zero configuration. Only add keys for the features you want.
 
-You can run without extra config (defaults are included), but for more stable Chainlink fallback it’s recommended to set at least one Polygon RPC.
+### API Keys by Feature
 
-#### Windows PowerShell (current terminal session)
+#### Alerts (optional)
 
-```powershell
-$env:POLYGON_RPC_URL = "https://polygon-rpc.com"
-$env:POLYGON_RPC_URLS = "https://polygon-rpc.com,https://rpc.ankr.com/polygon"
-$env:POLYGON_WSS_URLS = "wss://polygon-bor-rpc.publicnode.com"
+**Telegram:**
+1. Message [@BotFather](https://t.me/BotFather) on Telegram → `/newbot` → copy the token
+2. Message [@userinfobot](https://t.me/userinfobot) to get your chat ID
+3. Set in `.env`:
+```
+ENABLE_ALERTS=true
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=987654321
 ```
 
-Optional Polymarket settings:
-
-```powershell
-$env:POLYMARKET_AUTO_SELECT_LATEST = "true"
-# $env:POLYMARKET_SLUG = "btc-updown-15m-..."   # pin a specific market
+**Discord:**
+1. Open your Discord server → Settings → Integrations → Webhooks → New Webhook
+2. Copy the webhook URL
+3. Set in `.env`:
+```
+ENABLE_ALERTS=true
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
-#### Windows CMD (current terminal session)
+Alerts fire when the model detects a STRONG or GOOD entry signal, or when probability exceeds the threshold (default 70%). Cooldown is 15 minutes per market to avoid spam.
 
-```cmd
-set POLYGON_RPC_URL=https://polygon-rpc.com
-set POLYGON_RPC_URLS=https://polygon-rpc.com,https://rpc.ankr.com/polygon
-set POLYGON_WSS_URLS=wss://polygon-bor-rpc.publicnode.com
+#### Live Trading (optional, advanced)
+
+> **Default is DRY RUN** — all trades are logged to `./logs/dry-run-trades.csv` without executing. You must explicitly enable live trading.
+
+1. Go to [polymarket.com](https://polymarket.com) → Account Settings → API
+2. Generate API credentials
+3. Set in `.env`:
+```
+ENABLE_TRADING=true
+TRADING_DRY_RUN=false
+POLYMARKET_API_KEY=your-api-key
+POLYMARKET_API_SECRET=your-api-secret
+POLYMARKET_API_PASSPHRASE=your-passphrase
+POLYMARKET_PRIVATE_KEY=your-wallet-private-key
 ```
 
-Optional Polymarket settings:
+**Risk controls** (all configurable in `.env`):
+- `MAX_BET_USD=1` — max bet per trade
+- `DAILY_LOSS_LIMIT_USD=10` — circuit breaker trips at this loss
+- `MAX_OPEN_POSITIONS=3` — max concurrent positions
 
-```cmd
-set POLYMARKET_AUTO_SELECT_LATEST=true
-REM set POLYMARKET_SLUG=btc-updown-15m-...
+#### Faster Price Data (optional)
+
+The default public Polygon RPC works fine. For faster Chainlink updates, get a free key from [Alchemy](https://www.alchemy.com/), [Infura](https://infura.io/), or [QuickNode](https://www.quicknode.com/):
+
+```
+POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY
+POLYGON_WSS_URL=wss://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
 
-Notes:
-- These environment variables apply only to the current terminal window.
-- If you want permanent env vars, set them via Windows System Environment Variables or use a `.env` loader of your choice.
+## Web Dashboard
 
-## Configuration
+```bash
+npm run start:web
+```
 
-This project reads configuration from environment variables.
+Opens at http://localhost:3000 with:
+- Real-time signal display with color-coded strength
+- Model probability bar (UP vs DOWN)
+- Live BTC price, RSI, and probability sparkline charts
+- Polymarket prices, orderbook, and liquidity
+- All indicators: VWAP, RSI, MACD, Heiken Ashi
+- Auto-reconnecting WebSocket — never goes stale
 
-You can set them in your shell, or create a `.env` file and load it using your preferred method.
+## Backtesting
+
+The app automatically tracks every 15-minute window outcome while running. After collecting data:
+
+```bash
+npm run backtest
+```
+
+Outputs:
+- Model accuracy (overall and by regime/phase)
+- Simulated P&L from trade signals
+- Sharpe ratio, max drawdown, profit factor
+- Results saved to `./logs/backtest-results.json`
+
+Data files in `./logs/`:
+- `signals.csv` — every tick with indicators, model probs, edge
+- `outcomes.csv` — every 15m window with open/close prices and outcome
+- `dry-run-trades.csv` — simulated trades (when trading bot is active)
+
+## MCP Server (AI Integration)
+
+```bash
+npm run mcp
+```
+
+Add to your Claude Code MCP config to query the assistant from AI:
+
+**6 tools available:**
+- `get_current_signal` — current prediction, recommendation, edge
+- `get_market_state` — Polymarket prices, liquidity, time left
+- `get_price` — BTC prices from all sources
+- `get_indicators` — VWAP, RSI, MACD, Heiken Ashi, regime
+- `get_history` — recent signal history
+- `get_backtest_summary` — latest backtest results
+
+## Multi-Market
+
+```bash
+npm run start:multi
+```
+
+Track multiple markets simultaneously in a tabular console view. Configure via `markets.json` or `MULTI_MARKET_CONFIG` env var:
+
+```json
+[
+  { "label": "btc-15m", "slug": "" },
+  { "label": "btc-15m-specific", "slug": "btc-updown-15m-1771107300" }
+]
+```
+
+## Configuration Reference
 
 ### Polymarket
 
-- `POLYMARKET_AUTO_SELECT_LATEST` (default: `true`)
-  - When `true`, automatically picks the latest 15m market.
+- `POLYMARKET_AUTO_SELECT_LATEST` (default: `true`) — auto-pick latest 15m market
 - `POLYMARKET_SERIES_ID` (default: `10192`)
-- `POLYMARKET_SERIES_SLUG` (default: `btc-up-or-down-15m`)
-- `POLYMARKET_SLUG` (optional)
-  - If set, the assistant will target a specific market slug.
-- `POLYMARKET_LIVE_WS_URL` (default: `wss://ws-live-data.polymarket.com`)
+- `POLYMARKET_SLUG` (optional) — pin a specific market slug
 
 ### Chainlink on Polygon (fallback)
 
-- `CHAINLINK_BTC_USD_AGGREGATOR`
-  - Default: `0xc907E116054Ad103354f2D350FD2514433D57F6f`
-
-HTTP RPC:
 - `POLYGON_RPC_URL` (default: `https://polygon-rpc.com`)
-- `POLYGON_RPC_URLS` (optional, comma-separated)
-  - Example: `https://polygon-rpc.com,https://rpc.ankr.com/polygon`
+- `POLYGON_RPC_URLS` (optional, comma-separated fallbacks)
+- `POLYGON_WSS_URL` / `POLYGON_WSS_URLS` (optional, for real-time fallback)
 
-WSS RPC (optional but recommended for more real-time fallback):
-- `POLYGON_WSS_URL` (optional)
-- `POLYGON_WSS_URLS` (optional, comma-separated)
-
-### Proxy support
-
-The bot supports HTTP(S) proxies for both HTTP requests (fetch) and WebSocket connections.
-
-Supported env vars (standard):
-
-- `HTTPS_PROXY` / `https_proxy`
-- `HTTP_PROXY` / `http_proxy`
-- `ALL_PROXY` / `all_proxy`
-
-Examples:
-
-PowerShell:
-
-```powershell
-$env:HTTPS_PROXY = "http://127.0.0.1:8080"
-# or
-$env:ALL_PROXY = "socks5://127.0.0.1:1080"
-```
-
-CMD:
-
-```cmd
-set HTTPS_PROXY=http://127.0.0.1:8080
-REM or
-set ALL_PROXY=socks5://127.0.0.1:1080
-```
-
-#### Proxy with username + password (simple guide)
-
-1) Take your proxy host and port (example: `1.2.3.4:8080`).
-
-2) Add your login and password in the URL:
-
-- HTTP/HTTPS proxy:
-  - `http://USERNAME:PASSWORD@HOST:PORT`
-- SOCKS5 proxy:
-  - `socks5://USERNAME:PASSWORD@HOST:PORT`
-
-3) Set it in the terminal and run the bot.
-
-PowerShell:
-
-```powershell
-$env:HTTPS_PROXY = "http://USERNAME:PASSWORD@HOST:PORT"
-npm start
-```
-
-CMD:
-
-```cmd
-set HTTPS_PROXY=http://USERNAME:PASSWORD@HOST:PORT
-npm start
-```
-
-Important: if your password contains special characters like `@` or `:` you must URL-encode it.
-
-Example:
-
-- password: `p@ss:word`
-- encoded: `p%40ss%3Aword`
-- proxy URL: `http://user:p%40ss%3Aword@1.2.3.4:8080`
-
-## Run
+### Proxy Support
 
 ```bash
-npm start
+# HTTP proxy
+export HTTPS_PROXY=http://user:pass@host:port
+
+# SOCKS5 proxy
+export ALL_PROXY=socks5://user:pass@host:port
 ```
 
-### Stop
+If your password has special characters (`@`, `:`), URL-encode them: `p@ss:word` → `p%40ss%3Aword`
 
-Press `Ctrl + C` in the terminal.
+## Project Structure
 
-### Update to latest version
-
-```bash
-git pull
-npm install
-npm start
+```
+src/
+├── index.js              # Console dashboard (npm start)
+├── index-web.js          # Web dashboard entry
+├── index-alerts.js       # Console + alerts entry
+├── index-trading.js      # Trading bot entry
+├── index-multi.js        # Multi-market entry
+├── index-full.js         # All features combined
+├── config.js             # Configuration from env vars
+├── utils.js              # Shared utilities
+├── core/
+│   ├── poller.js         # Reusable poll loop (data fetching + indicators)
+│   └── state.js          # Global state with subscriber pattern
+├── data/                 # Data sources (Binance, Chainlink, Polymarket)
+├── indicators/           # TA: VWAP, RSI, MACD, Heiken Ashi
+├── engines/              # Regime detection, scoring, edge computation
+├── alerts/               # Telegram + Discord alert system
+├── trading/              # Auto-trading bot with risk management
+├── backtest/             # Window tracking + offline analyzer
+├── mcp/                  # MCP server for AI integration
+├── multi-market/         # Multi-market orchestrator
+├── web/                  # Fastify server + dashboard SPA
+│   └── static/           # HTML + JS frontend (Chart.js)
+└── net/                  # Proxy support
 ```
 
 ## Notes / Troubleshooting
 
-- If you see no Chainlink updates:
-  - Polymarket WS might be temporarily unavailable. The bot falls back to Chainlink on-chain price via Polygon RPC.
-  - Ensure at least one working Polygon RPC URL is configured.
-- If the console looks like it “spams” lines:
-  - The renderer uses `readline.cursorTo` + `clearScreenDown` for a stable, static screen, but some terminals may still behave differently.
+- If you see no Chainlink updates: Polymarket WS might be temporarily unavailable. The bot falls back to on-chain Polygon RPC.
+- The console renderer uses `readline.cursorTo` for a stable screen — some terminals may behave differently.
+- Web dashboard auto-reconnects if the connection drops.
+- Trading is **always dry-run** unless you explicitly set both `ENABLE_TRADING=true` and `TRADING_DRY_RUN=false`.
 
 ## Safety
 
-This is not financial advice. Use at your own risk.
+This is not financial advice. Use at your own risk. The trading bot defaults to dry-run mode with strict risk limits for a reason.
 
 created by @krajekis
