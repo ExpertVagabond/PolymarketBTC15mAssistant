@@ -268,6 +268,60 @@
     .sim-kpi-val.red { color: #f87171; }
     .sim-empty { text-align: center; padding: 48px 20px; color: #374151; font-size: 13px; }
 
+    /* ── Signal feed ── */
+    .feed-controls { display: flex; gap: 6px; padding: 14px 28px; flex-wrap: wrap; border-bottom: 1px solid #1a1a24; background: #0e0e16; }
+    .feed-list { padding: 0 28px 28px; }
+    .feed-item { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid #141420; align-items: flex-start; }
+    .feed-item:last-child { border-bottom: none; }
+    .feed-time { font-size: 11px; color: #4b5563; min-width: 70px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+    .feed-side { width: 60px; font-size: 11px; font-weight: 700; text-align: center; padding: 3px 0; border-radius: 4px; flex-shrink: 0; }
+    .feed-side.yes { background: #34d39918; color: #34d399; }
+    .feed-side.no { background: #f8717118; color: #f87171; }
+    .feed-body { flex: 1; min-width: 0; }
+    .feed-question { font-size: 13px; color: #d1d5db; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .feed-meta { display: flex; gap: 12px; font-size: 11px; color: #4b5563; margin-top: 4px; }
+    .feed-meta span em { font-style: normal; color: #9ca3af; font-weight: 500; }
+    .feed-outcome { width: 52px; text-align: center; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 6px; flex-shrink: 0; }
+    .feed-outcome.win { background: #34d39918; color: #34d399; }
+    .feed-outcome.loss { background: #f8717118; color: #f87171; }
+    .feed-outcome.void { background: #37415118; color: #6b7280; }
+    .feed-outcome.pending { background: #fbbf2418; color: #fbbf24; }
+    .feed-more { text-align: center; padding: 16px; }
+    .feed-more-btn { background: #14141e; border: 1px solid #1e1e2a; border-radius: 6px; padding: 8px 24px; font-size: 12px; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .feed-more-btn:hover { border-color: #3b82f6; color: #93c5fd; }
+
+    /* ── Market detail modal ── */
+    .mkt-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .mkt-detail-card { background: #0e0e16; border: 1px solid #1a1a24; border-radius: 8px; padding: 12px; text-align: center; }
+    .mkt-detail-label { font-size: 10px; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .mkt-detail-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .mkt-detail-val.green { color: #34d399; }
+    .mkt-detail-val.red { color: #f87171; }
+    .mkt-detail-val.amber { color: #fbbf24; }
+    .mkt-mini-chart { height: 160px; margin-top: 16px; }
+
+    /* ── Tooltips ── */
+    .tip { position: relative; display: inline-flex; align-items: center; cursor: help; }
+    .tip-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #1e1e2a; color: #4b5563; font-size: 9px; font-weight: 700; margin-left: 4px; flex-shrink: 0; }
+    .tip-icon:hover { background: #3b82f630; color: #60a5fa; }
+    .tip-text { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1a24; border: 1px solid #2a2a36; border-radius: 6px; padding: 8px 12px; font-size: 11px; color: #c8c8d0; line-height: 1.5; white-space: normal; width: 220px; z-index: 200; pointer-events: none; box-shadow: 0 4px 12px #00000060; }
+    .tip:hover .tip-text { display: block; }
+
+    /* ── Welcome modal ── */
+    .welcome-step { display: none; text-align: center; padding: 20px; }
+    .welcome-step.active { display: block; }
+    .welcome-step h3 { font-size: 18px; color: #fff; margin-bottom: 8px; }
+    .welcome-step p { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 16px; }
+    .welcome-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 16px; }
+    .welcome-dot { width: 8px; height: 8px; border-radius: 50%; background: #27272f; }
+    .welcome-dot.active { background: #3b82f6; }
+    .welcome-nav { display: flex; gap: 10px; justify-content: center; }
+    .welcome-nav button { padding: 8px 20px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; border: none; transition: opacity 0.15s; }
+    .welcome-skip { background: #14141e; color: #6b7280; border: 1px solid #1e1e2a !important; }
+    .welcome-skip:hover { color: #9ca3af; }
+    .welcome-next { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; }
+    .welcome-next:hover { opacity: 0.85; }
+
     /* ── Single-market mode (legacy fallback) ── */
     #singleMode { display: none; }
     #singleMode.visible { display: block; }
@@ -315,10 +369,12 @@
     <button class="tab-btn active" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="tab-btn" id="tabAnalytics" onclick="switchTab('analytics')">Analytics</button>
     <button class="tab-btn" id="tabPortfolio" onclick="switchTab('portfolio')">Portfolio</button>
+    <button class="tab-btn" id="tabFeed" onclick="switchTab('feed')">Feed</button>
     <button class="tab-btn" id="tabSimulator" onclick="switchTab('simulator')">Simulator</button>
     <span class="plan-badge free" id="planBadge">FREE</span>
     <button class="notify-btn" id="notifyBtn" onclick="toggleNotifications()" title="Toggle alerts">Alerts: Off</button>
     <a href="/stats.html" class="header-link">Performance</a>
+    <a href="/leaderboard.html" class="header-link">Leaderboard</a>
     <a href="/terms.html" class="header-link">Terms</a>
     <a href="/privacy.html" class="header-link">Privacy</a>
   </div>
@@ -377,12 +433,12 @@
             <th>Signal</th>
             <th>Model&nbsp;Prob</th>
             <th>Market&nbsp;Price</th>
-            <th>Edge</th>
+            <th><span class="tip">Edge<span class="tip-icon">?</span><span class="tip-text">How much the model's probability exceeds the market price. Bigger = stronger mispricing.</span></span></th>
             <th>RSI</th>
             <th>Vol</th>
-            <th>TF</th>
-            <th>Conf</th>
-            <th>Flow</th>
+            <th><span class="tip">TF<span class="tip-icon">?</span><span class="tip-text">Multi-timeframe confluence: how many timeframes (1m/5m/15m) agree on direction. 3/3 = strong.</span></span></th>
+            <th><span class="tip">Conf<span class="tip-icon">?</span><span class="tip-text">Confidence score (0-100) combining 9 factors: edge, indicators, confluence, flow, correlation, volatility, time, regime, combo learning.</span></span></th>
+            <th><span class="tip">Flow<span class="tip-icon">?</span><span class="tip-text">Order flow pressure from the orderbook. Shows whether buy/sell pressure supports or conflicts with the signal.</span></span></th>
             <th>Time Left</th>
             <th>Liquidity</th>
           </tr>
@@ -395,6 +451,11 @@
 
 <!-- ═══════ ANALYTICS MODE ═══════ -->
 <div id="analyticsMode" style="display:none">
+
+  <!-- Analytics controls -->
+  <div style="display:flex;justify-content:flex-end;padding:12px 28px 0;gap:8px">
+    <button class="fbtn" id="exportCsvBtn" onclick="exportCsv()" title="Export settled signals as CSV (Pro)">Export CSV</button>
+  </div>
 
   <!-- KPI strip -->
   <div class="summary-strip">
@@ -517,6 +578,19 @@
   </div>
 </div>
 
+<!-- ═══════ FEED MODE ═══════ -->
+<div id="feedMode" style="display:none">
+  <div class="feed-controls">
+    <button class="fbtn active" data-feed-filter="all" onclick="setFeedFilter('all',this)">All</button>
+    <button class="fbtn" data-feed-filter="pending" onclick="setFeedFilter('pending',this)">Pending</button>
+    <button class="fbtn" data-feed-filter="WIN" onclick="setFeedFilter('WIN',this)">Wins</button>
+    <button class="fbtn" data-feed-filter="LOSS" onclick="setFeedFilter('LOSS',this)">Losses</button>
+  </div>
+  <div class="feed-list" id="feedList">
+    <div class="sim-empty">Loading signal feed...</div>
+  </div>
+</div>
+
 <!-- ═══════ SIMULATOR MODE ═══════ -->
 <div id="simulatorMode" style="display:none">
 
@@ -624,6 +698,11 @@
   <div class="modal" id="signalModalContent"></div>
 </div>
 
+<!-- Market detail modal -->
+<div class="modal-overlay" id="marketModal" onclick="if(event.target===this)closeMarketModal()">
+  <div class="modal" id="marketModalContent" style="max-width:600px"></div>
+</div>
+
 <!-- Upgrade modal -->
 <div class="modal-overlay" id="upgradeModal" onclick="if(event.target===this)closeUpgradeModal()">
   <div class="modal" style="max-width:440px;text-align:center">
@@ -653,6 +732,45 @@
         </ul>
         <a href="/api/auth/login" class="upgrade-btn" style="display:block;margin-top:12px;text-align:center;background:linear-gradient(135deg,#8b5cf6,#ec4899)">Get Pro</a>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Welcome modal -->
+<div class="modal-overlay" id="welcomeModal" onclick="if(event.target===this)closeWelcome()">
+  <div class="modal" style="max-width:440px;padding:28px">
+    <button class="modal-close" onclick="closeWelcome()">&times;</button>
+    <div class="welcome-step active" data-step="0">
+      <h3>Welcome to PolySignal</h3>
+      <p>We scan 50+ Polymarket prediction markets in real-time, using AI-driven models to find mispriced outcomes you can trade.</p>
+      <div style="font-size:32px;margin:12px 0">~</div>
+    </div>
+    <div class="welcome-step" data-step="1">
+      <h3>How Signals Work</h3>
+      <p><strong style="color:#34d399">BUY YES</strong> means the model thinks YES will happen but the market price is too low.<br><br>
+      <strong style="color:#f87171">BUY NO</strong> means the opposite. <strong>Edge</strong> shows how much the model disagrees with the market. Bigger edge = stronger conviction.</p>
+    </div>
+    <div class="welcome-step" data-step="2">
+      <h3>Confidence & Kelly</h3>
+      <p><strong>Confidence (0-100)</strong> combines 9 factors: edge size, indicator agreement, multi-timeframe confluence, order flow, and more.<br><br>
+      <strong>Kelly %</strong> is the mathematically optimal bet size based on your edge and win probability.</p>
+    </div>
+    <div class="welcome-step" data-step="3">
+      <h3>Get More With Pro</h3>
+      <p>Free users see 3 signals and 10 markets. Upgrade to unlock full analytics, portfolio tracking, strategy simulator, and CSV exports.</p>
+      <div style="margin-top:8px">
+        <button class="welcome-next" onclick="closeWelcome();showUpgradeModal()">View Plans</button>
+      </div>
+    </div>
+    <div class="welcome-dots">
+      <div class="welcome-dot active" data-dot="0"></div>
+      <div class="welcome-dot" data-dot="1"></div>
+      <div class="welcome-dot" data-dot="2"></div>
+      <div class="welcome-dot" data-dot="3"></div>
+    </div>
+    <div class="welcome-nav">
+      <button class="welcome-skip" onclick="closeWelcome()">Skip</button>
+      <button class="welcome-next" id="welcomeNextBtn" onclick="nextWelcomeStep()">Next</button>
     </div>
   </div>
 </div>

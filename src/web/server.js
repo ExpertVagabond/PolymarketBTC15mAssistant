@@ -21,7 +21,7 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
@@ -253,6 +253,12 @@ export async function startWebServer(opts = {}) {
     if (req.query.minEdge) filters.minEdge = Number(req.query.minEdge);
     if (req.query.sides) filters.sides = req.query.sides.split(",");
     return simulateStrategy(filters);
+  });
+
+  /* ── Leaderboard API ── */
+
+  app.get("/api/leaderboard", async () => {
+    return getLeaderboard();
   });
 
   /* ── Portfolio API ── */

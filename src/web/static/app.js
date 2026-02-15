@@ -68,6 +68,39 @@ function gateOverlay(requiredPlan) {
 
 loadUserPlan();
 
+/* ═══ Welcome / Onboarding ═══ */
+
+let welcomeStep = 0;
+const WELCOME_STEPS = 4;
+
+function showWelcome() {
+  if (localStorage.getItem("ps_welcomed")) return;
+  $("welcomeModal")?.classList.add("open");
+}
+
+function closeWelcome() {
+  $("welcomeModal")?.classList.remove("open");
+  localStorage.setItem("ps_welcomed", "1");
+}
+
+function nextWelcomeStep() {
+  welcomeStep++;
+  if (welcomeStep >= WELCOME_STEPS) { closeWelcome(); return; }
+
+  document.querySelectorAll(".welcome-step").forEach(s => s.classList.toggle("active", Number(s.dataset.step) === welcomeStep));
+  document.querySelectorAll(".welcome-dot").forEach(d => d.classList.toggle("active", Number(d.dataset.dot) === welcomeStep));
+
+  if (welcomeStep === WELCOME_STEPS - 1) {
+    $("welcomeNextBtn").textContent = "Get Started";
+  }
+}
+
+window.closeWelcome = closeWelcome;
+window.nextWelcomeStep = nextWelcomeStep;
+
+// Show welcome after a short delay so the page loads first
+setTimeout(showWelcome, 1500);
+
 /* ═══ Tab Switching ═══ */
 
 let activeTab = "dashboard";
@@ -77,6 +110,7 @@ let portfolioRefreshTimer = null;
 let analyticsCharts = {};
 
 let simulatorLoaded = false;
+let feedLoaded = false;
 
 function switchTab(tab) {
   // Check feature gates
@@ -88,14 +122,20 @@ function switchTab(tab) {
   $("tabDashboard").classList.toggle("active", tab === "dashboard");
   $("tabAnalytics").classList.toggle("active", tab === "analytics");
   $("tabPortfolio").classList.toggle("active", tab === "portfolio");
+  $("tabFeed").classList.toggle("active", tab === "feed");
   $("tabSimulator").classList.toggle("active", tab === "simulator");
   $("scannerMode").style.display = tab === "dashboard" ? "block" : "none";
   $("analyticsMode").style.display = tab === "analytics" ? "block" : "none";
   $("portfolioMode").style.display = tab === "portfolio" ? "block" : "none";
+  $("feedMode").style.display = tab === "feed" ? "block" : "none";
   $("simulatorMode").style.display = tab === "simulator" ? "block" : "none";
 
   if (tab === "analytics" && !analyticsLoaded) {
     loadAnalytics();
+  }
+  if (tab === "feed" && !feedLoaded) {
+    loadFeed();
+    feedLoaded = true;
   }
   if (tab === "simulator" && !simulatorLoaded) {
     initSimulatorCategories();
@@ -420,7 +460,7 @@ function renderMarketsTable(markets) {
       sigDisplay = `<span class="sig-cell active">BUY ${sigSide}</span>`;
     }
 
-    return `<tr class="${hasSignal ? "row-signal" : ""}">
+    return `<tr class="${hasSignal ? "row-signal" : ""}" style="cursor:pointer" onclick="openMarketDetail('${esc(m.id || "")}')">
       <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.question)}">${esc(truncQ(m.question, 60))}</td>
       <td><span class="cat-pill cat-${catSlug}">${esc(cat)}</span></td>
       <td>${sigDisplay}</td>
@@ -1062,6 +1102,30 @@ async function renderSettledTable() {
   } catch { /* ignore */ }
 }
 
+/* ═══ CSV Export ═══ */
+
+async function exportCsv() {
+  if (!gates().csvExport) { showUpgradeModal(); return; }
+  try {
+    const res = await fetch("/api/analytics/export?format=csv&days=90");
+    const data = await res.json();
+    if (!data.csv) { alert("No data to export"); return; }
+    const blob = new Blob([data.csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `polysignal-signals-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("[export] Failed:", err);
+  }
+}
+
+window.exportCsv = exportCsv;
+
 /* ═══ Strategy Simulator ═══ */
 
 let simEquityChart = null;
@@ -1217,3 +1281,182 @@ window.toggleSimCat = toggleSimCat;
 window.toggleSimStr = toggleSimStr;
 window.toggleSimSide = toggleSimSide;
 window.runSimulation = runSimulation;
+
+/* ═══ Signal Feed ═══ */
+
+let feedSignals = [];
+let feedFilter = "all";
+let feedOffset = 0;
+const FEED_PAGE = 50;
+
+async function loadFeed(append = false) {
+  try {
+    const limit = FEED_PAGE;
+    const offset = append ? feedOffset : 0;
+    const res = await fetch(`/api/signals/recent?limit=${limit + offset}`);
+    const all = await res.json();
+
+    if (!append) {
+      feedSignals = all;
+      feedOffset = all.length;
+    } else {
+      feedSignals = all;
+      feedOffset = all.length;
+    }
+
+    renderFeed();
+  } catch (err) {
+    $("feedList").innerHTML = `<div class="sim-empty" style="color:#f87171">Failed to load feed</div>`;
+  }
+}
+
+function setFeedFilter(filter, btn) {
+  feedFilter = filter;
+  document.querySelectorAll("[data-feed-filter]").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  renderFeed();
+}
+
+function renderFeed() {
+  let items = feedSignals;
+
+  // Apply filter
+  if (feedFilter === "pending") {
+    items = items.filter(s => !s.outcome);
+  } else if (feedFilter === "WIN" || feedFilter === "LOSS") {
+    items = items.filter(s => s.outcome === feedFilter);
+  }
+
+  if (items.length === 0) {
+    $("feedList").innerHTML = '<div class="sim-empty">No signals match this filter.</div>';
+    return;
+  }
+
+  const html = items.map(s => {
+    const isYes = s.side === "UP";
+    const side = isYes ? "YES" : "NO";
+    const edge = s.edge != null ? "+" + (s.edge * 100).toFixed(1) + "%" : "-";
+    const conf = s.confidence != null ? s.confidence : "-";
+    const cat = s.category || "other";
+    const str = s.strength || "GOOD";
+    const time = s.created_at ? new Date(s.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+    let outcomeHtml = "";
+    if (s.outcome === "WIN") {
+      outcomeHtml = '<span class="feed-outcome win">WIN</span>';
+    } else if (s.outcome === "LOSS") {
+      outcomeHtml = '<span class="feed-outcome loss">LOSS</span>';
+    } else if (s.outcome === "VOID") {
+      outcomeHtml = '<span class="feed-outcome void">VOID</span>';
+    } else {
+      outcomeHtml = '<span class="feed-outcome pending">OPEN</span>';
+    }
+
+    const pnl = s.pnl_pct != null ? `P&L: <em style="color:${s.pnl_pct >= 0 ? "#34d399" : "#f87171"}">${s.pnl_pct >= 0 ? "+" : ""}${(s.pnl_pct * 100).toFixed(1)}%</em>` : "";
+
+    return `<div class="feed-item">
+      <span class="feed-time">${time}</span>
+      <span class="feed-side ${isYes ? 'yes' : 'no'}">${side}</span>
+      <div class="feed-body">
+        <div class="feed-question" title="${esc(s.question)}">${esc(s.question || "Unknown")}</div>
+        <div class="feed-meta">
+          <span>Edge: <em>${edge}</em></span>
+          <span>Conf: <em>${conf}</em></span>
+          <span><em>${str}</em></span>
+          <span>${esc(cat)}</span>
+          ${pnl ? `<span>${pnl}</span>` : ""}
+        </div>
+      </div>
+      ${outcomeHtml}
+    </div>`;
+  }).join("");
+
+  const moreBtn = feedSignals.length >= feedOffset
+    ? `<div class="feed-more"><button class="feed-more-btn" onclick="loadFeed(true)">Load More</button></div>`
+    : "";
+
+  $("feedList").innerHTML = html + moreBtn;
+}
+
+window.setFeedFilter = setFeedFilter;
+window.loadFeed = loadFeed;
+
+/* ═══ Market Detail Modal ═══ */
+
+async function openMarketDetail(marketId) {
+  if (!marketId) return;
+
+  $("marketModalContent").innerHTML = '<div style="text-align:center;padding:40px;color:#4b5563">Loading market data...</div>';
+  $("marketModal").classList.add("open");
+
+  try {
+    const data = await fetch(`/api/analytics/market/${encodeURIComponent(marketId)}`).then(r => r.json());
+
+    if (data.error) {
+      $("marketModalContent").innerHTML = `<button class="modal-close" onclick="closeMarketModal()">&times;</button>
+        <div style="text-align:center;padding:40px;color:#4b5563">No signal data for this market yet.</div>`;
+      return;
+    }
+
+    const winRate = data.win_rate != null ? data.win_rate + "%" : "-";
+    const wrColor = parseFloat(data.win_rate) >= 50 ? "green" : "red";
+    const totalPnl = data.total_pnl != null ? (data.total_pnl >= 0 ? "+" : "") + (data.total_pnl * 100).toFixed(1) + "%" : "-";
+    const pnlColor = (data.total_pnl ?? 0) >= 0 ? "green" : "red";
+    const avgEdge = data.avg_edge != null ? "+" + (data.avg_edge * 100).toFixed(1) + "%" : "-";
+    const avgConf = data.avg_confidence != null ? Math.round(data.avg_confidence) : "-";
+    const settled = (data.wins || 0) + (data.losses || 0);
+    const firstSig = data.first_signal ? new Date(data.first_signal).toLocaleDateString() : "-";
+    const lastSig = data.last_signal ? new Date(data.last_signal).toLocaleDateString() : "-";
+
+    $("marketModalContent").innerHTML = `
+      <button class="modal-close" onclick="closeMarketModal()">&times;</button>
+      <h3>${esc((data.question || "").slice(0, 80))}</h3>
+      <div class="modal-sub">${data.category || "other"} | ${data.total_signals} signals | ${firstSig} — ${lastSig}</div>
+
+      <div class="mkt-detail-grid">
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Win Rate</div>
+          <div class="mkt-detail-val ${wrColor}">${winRate}</div>
+        </div>
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Total P&L</div>
+          <div class="mkt-detail-val ${pnlColor}">${totalPnl}</div>
+        </div>
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Avg Edge</div>
+          <div class="mkt-detail-val green">${avgEdge}</div>
+        </div>
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Avg Confidence</div>
+          <div class="mkt-detail-val">${avgConf}</div>
+        </div>
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Settled</div>
+          <div class="mkt-detail-val">${settled}</div>
+        </div>
+        <div class="mkt-detail-card">
+          <div class="mkt-detail-label">Pending</div>
+          <div class="mkt-detail-val amber">${data.pending || 0}</div>
+        </div>
+      </div>
+
+      <div class="modal-section" style="margin-top:16px">
+        <div class="modal-section-title">Breakdown</div>
+        <div class="modal-kv"><span class="k">Wins</span><span class="v" style="color:#34d399">${data.wins || 0}</span></div>
+        <div class="modal-kv"><span class="k">Losses</span><span class="v" style="color:#f87171">${data.losses || 0}</span></div>
+        <div class="modal-kv"><span class="k">Avg P&L per Signal</span><span class="v">${data.avg_pnl != null ? (data.avg_pnl >= 0 ? "+" : "") + (data.avg_pnl * 100).toFixed(2) + "%" : "-"}</span></div>
+        <div class="modal-kv"><span class="k">Market ID</span><span class="v" style="font-size:10px;color:#4b5563">${data.market_id || marketId}</span></div>
+      </div>
+    `;
+  } catch (err) {
+    $("marketModalContent").innerHTML = `<button class="modal-close" onclick="closeMarketModal()">&times;</button>
+      <div style="text-align:center;padding:40px;color:#f87171">Failed to load market data</div>`;
+  }
+}
+
+function closeMarketModal() {
+  $("marketModal").classList.remove("open");
+}
+
+window.openMarketDetail = openMarketDetail;
+window.closeMarketModal = closeMarketModal;

@@ -799,6 +799,114 @@ export function simulateStrategy(filters = {}) {
 }
 
 /**
+ * Leaderboard data: category rankings, top-edge wins, best streaks, top markets.
+ */
+export function getLeaderboard() {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  // Category rankings by win rate (min 3 settled)
+  const categories = db.prepare(`
+    SELECT
+      category,
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as win_rate,
+      AVG(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as avg_pnl,
+      AVG(edge) as avg_edge,
+      AVG(confidence) as avg_confidence
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    GROUP BY category
+    HAVING (wins + losses) >= 3
+    ORDER BY win_rate DESC, wins DESC
+  `).all();
+
+  // Top signals by edge that won
+  const topEdgeWins = db.prepare(`
+    SELECT question, category, side, edge, confidence, pnl_pct, created_at
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome = 'WIN' AND edge IS NOT NULL
+    ORDER BY edge DESC
+    LIMIT 10
+  `).all();
+
+  // Top markets by win rate (min 2 settled)
+  const topMarkets = db.prepare(`
+    SELECT
+      market_id,
+      question,
+      category,
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as win_rate,
+      SUM(CASE WHEN outcome IS NOT NULL THEN pnl_pct ELSE 0 END) as total_pnl
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    GROUP BY market_id
+    HAVING (wins + losses) >= 2
+    ORDER BY win_rate DESC, total_pnl DESC
+    LIMIT 15
+  `).all();
+
+  // Streaks: compute current and best win streak from full settled history
+  const settled = db.prepare(`
+    SELECT outcome, category FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    ORDER BY created_at ASC
+  `).all();
+
+  let bestStreak = 0, currentStreak = 0;
+  const catStreaks = {};
+  for (const s of settled) {
+    if (s.outcome === "WIN") {
+      currentStreak++;
+      if (currentStreak > bestStreak) bestStreak = currentStreak;
+      const cat = s.category || "other";
+      catStreaks[cat] = (catStreaks[cat] || 0) + 1;
+    } else {
+      currentStreak = 0;
+      for (const k of Object.keys(catStreaks)) catStreaks[k] = 0;
+    }
+  }
+
+  // Convert catStreaks to sorted array (best per-category streak across history)
+  // Recompute properly: track best streak per category
+  const bestCatStreaks = {};
+  const curCatStreaks = {};
+  for (const s of settled) {
+    const cat = s.category || "other";
+    if (s.outcome === "WIN") {
+      curCatStreaks[cat] = (curCatStreaks[cat] || 0) + 1;
+      if ((curCatStreaks[cat] || 0) > (bestCatStreaks[cat] || 0)) {
+        bestCatStreaks[cat] = curCatStreaks[cat];
+      }
+    } else {
+      curCatStreaks[cat] = 0;
+    }
+  }
+  const streakBoard = Object.entries(bestCatStreaks)
+    .map(([category, streak]) => ({ category, streak }))
+    .sort((a, b) => b.streak - a.streak)
+    .slice(0, 10);
+
+  return {
+    categories,
+    topEdgeWins,
+    topMarkets,
+    bestWinStreak: bestStreak,
+    currentWinStreak: currentStreak,
+    streakBoard,
+    totalSettled: settled.length,
+    timestamp: new Date().toISOString()
+  };
+}
+
+/**
  * Initialize the signal history table.
  */
 export function initSignalHistory() {
