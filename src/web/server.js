@@ -49,7 +49,7 @@ import { getMonitorStatus } from "../trading/settlement-monitor.js";
 import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
-import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
+import { attachScannerTrader, getScannerTraderStats, getFilterStats } from "../trading/scanner-trader.js";
 import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions, autoRepairStalePositions } from "../trading/audit-log.js";
 import { getWalletBalance } from "../trading/wallet.js";
 import { getRealtimePnl } from "../trading/pnl-tracker.js";
@@ -801,6 +801,10 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/hourly-stats", async () => {
     return getHourlyWinRates();
+  });
+
+  app.get("/api/trading/filter-stats", async () => {
+    return getFilterStats();
   });
 
   app.get("/api/trading/quality-stats", async () => {

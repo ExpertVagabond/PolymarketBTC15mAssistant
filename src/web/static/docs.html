@@ -280,7 +280,11 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/pnl", desc: "Real-time unrealized P&L for all open positions", tryable: true },
     { method: "GET", path: "/api/trading/config", desc: "Current trading config values with metadata", tryable: true },
     { method: "POST", path: "/api/trading/config", desc: "Update trading config: { max_bet_usd, daily_loss_limit_usd, ... } (auth required)" },
-    { method: "GET", path: "/api/trading/analytics", desc: "Trade performance: win rate, P&L by category/day, edge accuracy, close reasons", tryable: true }
+    { method: "GET", path: "/api/trading/analytics", desc: "Trade performance: win rate, P&L by category/day, edge accuracy, close reasons", tryable: true },
+    { method: "POST", path: "/api/trading/reconcile/repair", desc: "Auto-repair stale positions older than maxAgeHours (default 72h, auth required)" },
+    { method: "GET", path: "/api/trading/hourly-stats", desc: "Win rates grouped by hour-of-day (0-23 UTC) with sample sizes", tryable: true },
+    { method: "GET", path: "/api/trading/filter-stats", desc: "Signal filter funnel: how many signals blocked by each gate (dedup, cooldown, regime, quality, etc)", tryable: true },
+    { method: "GET", path: "/api/trading/quality-stats", desc: "Quality score distribution across recent trade executions", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

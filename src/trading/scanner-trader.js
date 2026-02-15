@@ -24,6 +24,7 @@ const MIN_STRENGTH = new Set(["STRONG", "GOOD"]);
 
 let signalCount = 0;
 let tradeCount = 0;
+const filterStats = { dedup: 0, cooldown: 0, correlated: 0, settlement: 0, spread: 0, chop: 0, risk: 0, quality: 0 };
 
 /**
  * Attach trading pipeline to an orchestrator instance.
@@ -62,10 +63,12 @@ async function processSignal(tick) {
 
   // Dedup: skip if already holding this market or recently traded
   if (hasOpenPositionOnMarket(marketId)) {
+    filterStats.dedup++;
     console.log(`[scanner-trader] SKIP: already holding position on ${tick.market?.slug || marketId}`);
     return;
   }
   if (isMarketOnCooldown(marketId)) {
+    filterStats.cooldown++;
     console.log(`[scanner-trader] SKIP: cooldown active on ${tick.market?.slug || marketId}`);
     return;
   }
@@ -75,6 +78,7 @@ async function processSignal(tick) {
   const category = tick.market?.category || tick.category || null;
   const corrCheck = isCorrelatedWithOpenPosition(category, question);
   if (corrCheck.correlated) {
+    filterStats.correlated++;
     console.log(`[scanner-trader] SKIP: correlated with exec #${corrCheck.matchedExecId} | ${corrCheck.matchedQuestion?.slice(0, 40)}`);
     return;
   }
@@ -83,6 +87,7 @@ async function processSignal(tick) {
   const settlementLeftMin = tick.settlementLeftMin ?? tick.market?.settlementLeftMin ?? null;
   const minSettlementMin = getConfigValue("min_settlement_minutes");
   if (settlementLeftMin != null && settlementLeftMin < minSettlementMin) {
+    filterStats.settlement++;
     console.log(`[scanner-trader] SKIP: settling too soon (${Math.round(settlementLeftMin)}min < ${minSettlementMin}min) | ${tick.market?.slug || marketId}`);
     return;
   }
@@ -93,6 +98,7 @@ async function processSignal(tick) {
   const spread = orderbook?.spread ?? null;
   const maxSpread = getConfigValue("max_spread");
   if (spread != null && spread > maxSpread) {
+    filterStats.spread++;
     console.log(`[scanner-trader] SKIP: spread too wide (${spread.toFixed(3)} > ${maxSpread}) | ${tick.market?.slug || marketId}`);
     return;
   }
@@ -100,6 +106,7 @@ async function processSignal(tick) {
   // Regime filter: skip CHOP markets, reduce size in RANGE
   const regime = tick.regimeInfo?.regime || "RANGE";
   if (regime === "CHOP") {
+    filterStats.chop++;
     console.log(`[scanner-trader] SKIP: CHOP regime | ${tick.market?.slug || marketId}`);
     return;
   }
@@ -117,6 +124,7 @@ async function processSignal(tick) {
   // Check risk limits (with category for concentration check)
   const riskCheck = canTrade(category);
   if (!riskCheck.allowed) {
+    filterStats.risk++;
     logAuditEvent("RISK_BLOCKED", { marketId: tick.marketId, side: rec.side, category, detail: riskCheck.reason });
     console.log(`[scanner-trader] BLOCKED: ${riskCheck.reason} | ${tick.signal} on ${tick.market?.slug || tick.marketId}`);
     return;
@@ -137,6 +145,7 @@ async function processSignal(tick) {
   const qualityResult = computeSignalQuality(tick, { streakMultiplier: sizing.streakMult ?? 1.0, hourMultiplier, regimeMultiplier });
   const quality = qualityResult.quality;
   if (quality < 30) {
+    filterStats.quality++;
     console.log(`[scanner-trader] SKIP: quality too low (${quality}/100) | ${tick.market?.slug || marketId}`);
     return;
   }
@@ -284,6 +293,15 @@ export function getScannerTraderStats() {
     dryRun: DRY_RUN,
     apiConfigured: isTradingConfigured(),
     risk: getRiskStatus(),
-    botControl: getBotControlState()
+    botControl: getBotControlState(),
+    filters: { ...filterStats }
   };
+}
+
+/**
+ * Get signal filter stats (how many signals were blocked by each gate).
+ */
+export function getFilterStats() {
+  const totalFiltered = Object.values(filterStats).reduce((a, b) => a + b, 0);
+  return { signalsReceived: signalCount, tradesExecuted: tradeCount, totalFiltered, ...filterStats };
 }

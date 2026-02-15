@@ -190,10 +190,22 @@
       <div id="analyticsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Signal Filters -->
+    <div class="card">
+      <div class="card-title">Signal Filters</div>
+      <div id="filterStatsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Close Reasons -->
     <div class="card">
       <div class="card-title">Close Reasons</div>
       <div id="closeReasonsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Hourly Win Rates -->
+    <div class="card wide">
+      <div class="card-title">Hourly Win Rates (UTC)</div>
+      <div id="hourlyBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
     <!-- Error Trends -->
@@ -247,7 +259,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -261,7 +273,9 @@ async function loadAdmin() {
       fetch("/api/trading/open").then(r => r.json()).catch(() => []),
       fetch("/api/trading/pnl").then(r => r.json()).catch(() => null),
       fetch("/api/trading/config").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/analytics").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/analytics").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/hourly-stats").then(r => r.json()).catch(() => []),
+      fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -276,6 +290,8 @@ async function loadAdmin() {
     if (tradingConfig) renderTradingConfig(tradingConfig);
     if (trading) { trading._openExecutions = openExecs || []; trading._pnl = pnl; renderTrading(trading); }
     if (analytics) renderAnalytics(analytics);
+    if (hourlyStats) renderHourly(hourlyStats);
+    if (filterStatsData) renderFilterStats(filterStatsData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -552,6 +568,13 @@ function renderTrading(t) {
     <div class="kv"><span class="k">Win/Loss</span><span class="v">${e.wins || 0}W / ${e.losses || 0}L</span></div>
     <div class="kv"><span class="k">TP / SL</span><span class="v">+${m.takeProfitPct || 0}% / ${m.stopLossPct || 0}%</span></div>
   `;
+  // Streak info
+  const streak = r.streak || {};
+  if (streak.direction && streak.direction !== "none") {
+    const sColor = streak.direction === "win" ? "green" : "red";
+    const multColor = streak.multiplier < 1 ? "red" : streak.multiplier > 1 ? "green" : "";
+    html += `<div class="kv"><span class="k">Streak</span><span class="v ${sColor}">${streak.streak}x ${streak.direction.toUpperCase()} <span style="font-size:9px;color:#6b7280">(${streak.multiplier}x sizing)</span></span></div>`;
+  }
   // Exposure & concentration
   const exp = r.exposure || {};
   if (exp.totalExposure != null) {
@@ -717,6 +740,48 @@ function renderAnalytics(a) {
     : '<div style="color:#4b5563;font-size:12px">No closed trades yet</div>';
 }
 
+function renderFilterStats(f) {
+  const el = $("filterStatsBlock");
+  if (!el) return;
+  const passRate = f.signalsReceived > 0 ? ((f.tradesExecuted / f.signalsReceived) * 100).toFixed(1) : "0";
+  const labels = { dedup: "Duplicate Market", cooldown: "Cooldown", correlated: "Correlated", settlement: "Settlement", spread: "Wide Spread", chop: "CHOP Regime", risk: "Risk Limit", quality: "Low Quality" };
+  let html = `<div class="kv"><span class="k">Signals In</span><span class="v blue">${f.signalsReceived}</span></div>
+    <div class="kv"><span class="k">Trades Out</span><span class="v green">${f.tradesExecuted}</span></div>
+    <div class="kv"><span class="k">Pass Rate</span><span class="v">${passRate}%</span></div>
+    <div class="kv"><span class="k">Total Filtered</span><span class="v amber">${f.totalFiltered}</span></div>`;
+  for (const [key, label] of Object.entries(labels)) {
+    const val = f[key] || 0;
+    if (val > 0) html += `<div class="kv"><span class="k" style="font-size:10px">${label}</span><span class="v red" style="font-size:10px">${val}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderHourly(data) {
+  const el = $("hourlyBlock");
+  if (!el || !Array.isArray(data)) return;
+  if (data.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No hourly data yet</div>'; return; }
+  const byHour = {};
+  for (const d of data) byHour[d.hour] = d;
+  let html = '<div style="display:flex;gap:2px;flex-wrap:wrap">';
+  for (let h = 0; h < 24; h++) {
+    const d = byHour[h];
+    const wr = d?.win_rate;
+    const n = d ? (d.wins || 0) + (d.losses || 0) : 0;
+    let bg = "#1e1e2a"; let fg = "#4b5563";
+    if (n >= 5) {
+      if (wr >= 65) { bg = "#34d39930"; fg = "#34d399"; }
+      else if (wr < 40) { bg = "#f8717130"; fg = "#f87171"; }
+      else { bg = "#fbbf2420"; fg = "#fbbf24"; }
+    }
+    html += `<div title="${h}:00 UTC — ${n > 0 ? wr?.toFixed(0) + '% WR (' + n + ' trades)' : 'No data'}" style="width:30px;height:36px;background:${bg};border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;cursor:default">
+      <span style="color:${fg};font-weight:700">${h}</span>
+      <span style="color:${n >= 5 ? fg : '#27272f'};font-size:8px">${n > 0 ? (wr?.toFixed(0) || "?") + "%" : "-"}</span>
+    </div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }
 
 // --- WebSocket: live trade events ---
@@ -768,7 +833,9 @@ function handleTradeEvent(msg) {
   let detail = "";
 
   if (msg.event === "POSITION_OPENED") {
-    detail = `${msg.side} on ${esc((msg.question || msg.marketId || "").slice(0, 45))} | $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}${msg.dryRun ? " [DRY]" : ""}`;
+    const qBadge = msg.quality != null ? `<span style="color:#a78bfa;font-weight:700">Q:${msg.quality}</span> ` : "";
+    const rBadge = msg.regime ? `<span style="color:#6b7280">[${msg.regime}]</span> ` : "";
+    detail = `${qBadge}${rBadge}${msg.side} on ${esc((msg.question || msg.marketId || "").slice(0, 40))} | $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}${msg.dryRun ? " [DRY]" : ""}`;
   } else if (msg.event === "POSITION_CLOSED") {
     const pnl = msg.pnlUsd || 0;
     detail = `${msg.closeReason} | ${msg.side} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${(msg.pnlPct || 0).toFixed(1)}%) | held ${msg.holdMinutes || 0}m`;
