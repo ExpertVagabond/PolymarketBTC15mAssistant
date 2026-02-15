@@ -8,6 +8,7 @@ import { createWindowTracker } from "../backtest/window-tracker.js";
 import { checkAndAlert } from "../alerts/manager.js"; // legacy Telegram/Discord
 import { dispatchWebhooks, dispatchEmailAlerts } from "../notifications/dispatch.js";
 import { canTrade, getBetSize, recordTradeOpen, recordTradeClose, getRiskStatus, syncOpenPositions } from "./risk-manager.js";
+import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
 import { placeMarketOrder, placeSellOrder, checkLiquidity } from "./clob-orders.js";
@@ -71,6 +72,15 @@ export async function startTradingBot() {
       dispatchEmailAlerts(state).catch(() => {});
     }
 
+    // Check bot control state (runtime stop/pause)
+    if (!canOpenNewTrades()) {
+      if (tickCount % 60 === 0) {
+        const ctrl = getBotControlState();
+        console.log(`[${new Date().toISOString()}] Bot ${ctrl.state} — skipping signals`);
+      }
+      return;
+    }
+
     // only trade on ENTER signals with STRONG or GOOD strength
     if (rec.action !== "ENTER" || (rec.strength !== "STRONG" && rec.strength !== "GOOD")) {
       if (tickCount % 60 === 0) {
@@ -80,8 +90,10 @@ export async function startTradingBot() {
       return;
     }
 
-    // check risk limits
-    const riskCheck = canTrade();
+    const category = state.poly?.market?.category ?? null;
+
+    // check risk limits (with category for concentration check)
+    const riskCheck = canTrade(category);
     if (!riskCheck.allowed) {
       console.log(`[${new Date().toISOString()}] BLOCKED: ${riskCheck.reason} | Signal was: ${signal}`);
       return;
@@ -93,7 +105,6 @@ export async function startTradingBot() {
     const entryPrice = rec.side === "UP" ? (state.prices?.up ?? 0.5) : (state.prices?.down ?? 0.5);
     const confidence = state.confidence?.score ?? null;
     const question = state.poly?.market?.question ?? null;
-    const category = state.poly?.market?.category ?? null;
 
     console.log(`[${new Date().toISOString()}] SIGNAL: ${signal} | ${rec.strength} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)}`);
 

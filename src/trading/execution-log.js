@@ -166,3 +166,29 @@ export function getExecutionStats() {
   ensureTable();
   return stmts.stats.get();
 }
+
+/**
+ * Force-cancel an open execution (admin action — marks as cancelled, no sell order).
+ */
+export function cancelExecution(executionId) {
+  ensureTable();
+  const exec = stmts.getById.get(executionId);
+  if (!exec) return { error: "not_found" };
+  if (exec.status !== "open") return { error: "not_open", status: exec.status };
+  getDb().prepare(
+    "UPDATE trade_executions SET status = 'cancelled', close_reason = 'admin_cancel', closed_at = datetime('now') WHERE id = ?"
+  ).run(executionId);
+  return { ok: true, id: executionId };
+}
+
+/**
+ * Cancel all open executions (emergency liquidation — marks all as cancelled).
+ */
+export function cancelAllOpenExecutions() {
+  ensureTable();
+  const open = stmts.getOpen.all();
+  const info = getDb().prepare(
+    "UPDATE trade_executions SET status = 'cancelled', close_reason = 'admin_liquidate_all', closed_at = datetime('now') WHERE status = 'open'"
+  ).run();
+  return { ok: true, cancelled: info.changes, positions: open };
+}

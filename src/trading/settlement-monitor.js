@@ -9,6 +9,8 @@
 import { recordTradeClose } from "./risk-manager.js";
 import { placeSellOrder } from "./clob-orders.js";
 import { closeExecution } from "./execution-log.js";
+import { isMonitorActive, checkDrainComplete } from "./bot-control.js";
+import { logAuditEvent } from "./audit-log.js";
 import { CONFIG } from "../config.js";
 
 const TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT) || 15;
@@ -91,7 +93,22 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
     (sellResult ? ` | Sell: ${sellResult.ok ? "OK" : "FAILED"}` : "")
   );
 
+  // Audit log the close
+  logAuditEvent("POSITION_CLOSED", {
+    executionId: trade.executionId,
+    marketId: trade.marketId,
+    tokenId: trade.tokenId,
+    side: trade.side,
+    price: currentPrice,
+    pnlUsd: pnlUsd,
+    dryRun: trade.dryRun,
+    detail: { closeReason, pnlPct, sellResult: sellResult?.ok ?? null }
+  });
+
   openTrades.delete(trade.signalId);
+
+  // Check if drain mode should complete
+  checkDrainComplete(openTrades.size);
 }
 
 /**
@@ -100,6 +117,7 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
  */
 async function checkOpenTrades() {
   if (openTrades.size === 0) return;
+  if (!isMonitorActive()) return;
 
   for (const [signalId, trade] of openTrades) {
     try {

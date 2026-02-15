@@ -46,8 +46,11 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
+import { setBotState, getBotControlState } from "../trading/bot-control.js";
+import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
+import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions } from "../trading/audit-log.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -731,10 +734,20 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/trading/status", async () => {
     return {
       configured: isTradingConfigured(),
+      control: getBotControlState(),
       risk: getRiskStatus(),
       monitor: getMonitorStatus(),
-      executionStats: getExecutionStats()
+      executionStats: getExecutionStats(),
+      scannerTrader: getScannerTraderStats()
     };
+  });
+
+  app.post("/api/trading/control", { preHandler: requireAuth }, async (req) => {
+    const { action, reason } = req.body || {};
+    const stateMap = { stop: "stopped", pause: "paused", resume: "running", drain: "draining" };
+    const newState = stateMap[action];
+    if (!newState) return { error: "invalid_action", hint: "Use: stop, pause, resume, drain" };
+    return setBotState(newState, reason || `via admin (${req.sessionUser?.email})`);
   });
 
   app.get("/api/trading/executions", async (req) => {
@@ -744,6 +757,47 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/open", async () => {
     return getOpenExecutions();
+  });
+
+  app.get("/api/trading/execution/:id", async (req) => {
+    const exec = getExecutionById(Number(req.params.id));
+    return exec || { error: "not_found" };
+  });
+
+  app.post("/api/trading/close/:id", { preHandler: requireAuth }, async (req) => {
+    return cancelExecution(Number(req.params.id));
+  });
+
+  app.post("/api/trading/liquidate-all", { preHandler: requireAuth }, async (req) => {
+    const result = cancelAllOpenExecutions();
+    if (result.ok) {
+      // Also pause the bot to prevent new trades
+      setBotState("paused", "emergency_liquidation");
+    }
+    return result;
+  });
+
+  app.get("/api/trading/audit", async (req) => {
+    const { eventType, marketId, executionId, days, limit, offset } = req.query;
+    return queryAuditLog({
+      eventType, marketId,
+      executionId: executionId ? Number(executionId) : undefined,
+      days: Number(days) || 7,
+      limit: Math.min(Number(limit) || 100, 500),
+      offset: Number(offset) || 0
+    });
+  });
+
+  app.get("/api/trading/audit/summary", async (req) => {
+    return getAuditSummary(Number(req.query.days) || 7);
+  });
+
+  app.get("/api/trading/audit/execution/:id", async (req) => {
+    return getExecutionAuditTrail(Number(req.params.id));
+  });
+
+  app.get("/api/trading/reconcile", { preHandler: requireAuth }, async () => {
+    return reconcilePositions();
   });
 
   /* ── API Key Auth (X-API-Key header) ── */
@@ -895,6 +949,11 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
       done(err);
     }
   });
+
+  // Attach scanner-trader bridge if orchestrator is available
+  if (orchestrator) {
+    attachScannerTrader(orchestrator);
+  }
 
   // Start webhook delivery queue processor
   startQueueProcessor();

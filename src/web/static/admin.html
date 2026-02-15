@@ -221,7 +221,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -231,7 +231,8 @@ async function loadAdmin() {
       fetch("/api/admin/cache-stats").then(r => r.json()).catch(() => null),
       fetch("/api/admin/perf").then(r => r.json()).catch(() => null),
       fetch("/api/admin/maintenance").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/status").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/status").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/open").then(r => r.json()).catch(() => [])
     ]);
 
     renderHealth(health);
@@ -243,7 +244,7 @@ async function loadAdmin() {
     if (cacheStats) renderCacheStats(cacheStats);
     if (perf) renderPerfStats(perf);
     if (maint) renderMaintenance(maint);
-    if (trading) renderTrading(trading);
+    if (trading) { trading._openExecutions = openExecs || []; renderTrading(trading); }
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -494,13 +495,23 @@ function renderTrading(t) {
   const r = t.risk || {};
   const m = t.monitor || {};
   const e = t.executionStats || {};
+  const c = t.control || {};
   const cbColor = r.circuitBroken ? "red" : "green";
   const pnlColor = r.dailyPnl >= 0 ? "green" : "red";
+  const stateColor = c.state === "running" ? "green" : c.state === "paused" ? "amber" : c.state === "draining" ? "blue" : "red";
   let html = `
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="kv"><span class="k">Bot State</span><span class="v ${stateColor}">${(c.state || "unknown").toUpperCase()}</span></div>
       <div class="kv"><span class="k">API</span><span class="v ${t.configured ? "green" : "red"}">${t.configured ? "Configured" : "Not Set"}</span></div>
       <div class="kv"><span class="k">Circuit</span><span class="v ${cbColor}">${r.circuitBroken ? "BROKEN" : "OK"}</span></div>
       <div class="kv"><span class="k">Monitor</span><span class="v ${m.running ? "green" : "amber"}">${m.running ? "Running" : "Stopped"}</span></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="try-btn" style="${c.state === "running" ? "border-color:#34d399;color:#34d399" : ""}" onclick="botControl('resume')">Resume</button>
+      <button class="try-btn" style="${c.state === "paused" ? "border-color:#fbbf24;color:#fbbf24" : ""}" onclick="botControl('pause')">Pause</button>
+      <button class="try-btn" style="${c.state === "draining" ? "border-color:#60a5fa;color:#60a5fa" : ""}" onclick="botControl('drain')">Drain</button>
+      <button class="try-btn" style="${c.state === "stopped" ? "border-color:#f87171;color:#f87171" : ""}" onclick="botControl('stop')">Stop</button>
+      <button class="try-btn" style="border-color:#f87171;color:#f87171;margin-left:auto" onclick="liquidateAll()">Liquidate All</button>
     </div>
     <div class="kv"><span class="k">Daily P&L</span><span class="v ${pnlColor}">$${(r.dailyPnl || 0).toFixed(2)} / -$${r.dailyLossLimit || 0} limit</span></div>
     <div class="kv"><span class="k">Open Positions</span><span class="v">${r.openPositions || 0} / ${r.maxPositions || 0}</span></div>
@@ -509,13 +520,71 @@ function renderTrading(t) {
     <div class="kv"><span class="k">Win/Loss</span><span class="v">${e.wins || 0}W / ${e.losses || 0}L</span></div>
     <div class="kv"><span class="k">TP / SL</span><span class="v">+${m.takeProfitPct || 0}% / ${m.stopLossPct || 0}%</span></div>
   `;
-  if (m.trades && m.trades.length > 0) {
-    html += '<div style="margin-top:8px;font-size:10px;color:#4b5563">Open trades:</div>';
+  // Exposure & concentration
+  const exp = r.exposure || {};
+  if (exp.totalExposure != null) {
+    const expColor = exp.totalExposure >= (exp.maxExposure || 50) ? "red" : exp.totalExposure > 0 ? "amber" : "green";
+    html += `<div class="kv"><span class="k">Total Exposure</span><span class="v ${expColor}">$${(exp.totalExposure || 0).toFixed(2)} / $${exp.maxExposure || 0}</span></div>`;
+    if (exp.byCategory && Object.keys(exp.byCategory).length > 0) {
+      html += '<div style="margin-top:4px;font-size:9px;color:#4b5563;font-weight:700">CATEGORY EXPOSURE</div>';
+      for (const [cat, amt] of Object.entries(exp.byCategory)) {
+        const pct = exp.totalExposure > 0 ? (amt / exp.totalExposure * 100).toFixed(0) : 0;
+        const warn = (exp.warnings || []).some(w => w.category === cat);
+        html += `<div class="kv"><span class="k" style="font-size:10px">${esc(cat)}</span><span class="v ${warn ? "red" : ""}" style="font-size:10px">$${amt.toFixed(2)} (${pct}%)</span></div>`;
+      }
+    }
+  }
+  if (c.reason) html += `<div class="kv"><span class="k">State Reason</span><span class="v" style="color:#6b7280">${esc(c.reason)}</span></div>`;
+  // Show open executions from DB with close buttons
+  const openExecs = t._openExecutions || [];
+  if (openExecs.length > 0) {
+    html += '<div style="margin-top:10px;font-size:10px;color:#4b5563;font-weight:700">OPEN POSITIONS</div>';
+    for (const ex of openExecs) {
+      html += `<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#9ca3af;padding:3px 0;border-bottom:1px solid #141420">
+        <span style="flex:1">#${ex.id} ${esc(ex.side)} ${esc(ex.question?.slice(0,40) || ex.market_id?.slice(0,12))} @ ${(ex.entry_price||0).toFixed(3)} ${ex.dry_run ? "[DRY]" : "[LIVE]"}</span>
+        <button class="try-btn" style="font-size:9px;padding:1px 6px;border-color:#f87171;color:#f87171" onclick="closePosition(${ex.id})">Close</button>
+      </div>`;
+    }
+  } else if (m.trades && m.trades.length > 0) {
+    html += '<div style="margin-top:8px;font-size:10px;color:#4b5563">Open trades (monitor):</div>';
     for (const tr of m.trades) {
       html += `<div style="font-size:10px;color:#9ca3af;padding:2px 0">${esc(tr.side)} ${esc(tr.marketId?.slice(0,12))} @ ${tr.entryPrice?.toFixed(3)} (${tr.ageMinutes}m) ${tr.dryRun ? "[DRY]" : "[LIVE]"}</div>`;
     }
   }
   el.innerHTML = html;
+}
+
+async function botControl(action) {
+  try {
+    const res = await fetch("/api/trading/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action })
+    });
+    const data = await res.json();
+    if (data.ok) loadAdmin();
+    else alert(data.error || "Failed");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function closePosition(id) {
+  if (!confirm("Cancel position #" + id + "?")) return;
+  try {
+    const res = await fetch("/api/trading/close/" + id, { method: "POST" });
+    const data = await res.json();
+    if (data.ok) loadAdmin();
+    else alert(data.error || "Failed");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function liquidateAll() {
+  if (!confirm("Cancel ALL open positions and pause the bot?")) return;
+  try {
+    const res = await fetch("/api/trading/liquidate-all", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) { alert("Cancelled " + data.cancelled + " positions. Bot paused."); loadAdmin(); }
+    else alert(data.error || "Failed");
+  } catch (err) { alert("Error: " + err.message); }
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

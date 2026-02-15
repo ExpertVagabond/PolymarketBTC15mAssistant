@@ -9,6 +9,8 @@ import { getDb } from "../subscribers/db.js";
 const MAX_BET = Number(process.env.MAX_BET_USD) || 1;
 const DAILY_LOSS_LIMIT = Number(process.env.DAILY_LOSS_LIMIT_USD) || 10;
 const MAX_POSITIONS = Number(process.env.MAX_OPEN_POSITIONS) || 3;
+const MAX_CATEGORY_CONCENTRATION = Number(process.env.MAX_CATEGORY_CONCENTRATION_PCT) || 50; // max % in one category
+const MAX_TOTAL_EXPOSURE = Number(process.env.MAX_TOTAL_EXPOSURE_USD) || 50;
 
 let initialized = false;
 let dailyPnl = 0;
@@ -79,11 +81,27 @@ function checkDayReset() {
   }
 }
 
-export function canTrade() {
+export function canTrade(category = null) {
   checkDayReset();
   if (circuitBroken) return { allowed: false, reason: "circuit_breaker" };
   if (dailyPnl <= -DAILY_LOSS_LIMIT) return { allowed: false, reason: "daily_loss_limit" };
   if (openPositions >= MAX_POSITIONS) return { allowed: false, reason: "max_positions" };
+
+  // Check total exposure
+  const exposure = getExposure();
+  if (exposure.totalExposure >= MAX_TOTAL_EXPOSURE) {
+    return { allowed: false, reason: `total_exposure_limit ($${exposure.totalExposure.toFixed(2)}/$${MAX_TOTAL_EXPOSURE})` };
+  }
+
+  // Check category concentration
+  if (category && exposure.totalExposure > 0) {
+    const catExposure = exposure.byCategory[category] || 0;
+    const catPct = (catExposure / exposure.totalExposure) * 100;
+    if (catPct >= MAX_CATEGORY_CONCENTRATION && catExposure > 0) {
+      return { allowed: false, reason: `category_concentration (${category}: ${catPct.toFixed(0)}%)` };
+    }
+  }
+
   return { allowed: true };
 }
 
@@ -117,8 +135,39 @@ export function tripCircuitBreaker(reason) {
   console.log(`[risk] Circuit breaker tripped: ${reason}`);
 }
 
+/**
+ * Calculate current exposure from open trade_executions.
+ */
+export function getExposure() {
+  ensureTable();
+  try {
+    const rows = getDb().prepare(
+      "SELECT category, amount FROM trade_executions WHERE status = 'open'"
+    ).all();
+    const byCategory = {};
+    let totalExposure = 0;
+    for (const row of rows) {
+      totalExposure += row.amount;
+      const cat = row.category || "other";
+      byCategory[cat] = (byCategory[cat] || 0) + row.amount;
+    }
+    // Build concentration warnings
+    const warnings = [];
+    for (const [cat, amt] of Object.entries(byCategory)) {
+      const pct = totalExposure > 0 ? (amt / totalExposure) * 100 : 0;
+      if (pct >= MAX_CATEGORY_CONCENTRATION) {
+        warnings.push({ category: cat, exposureUsd: amt, concentrationPct: Math.round(pct) });
+      }
+    }
+    return { totalExposure, maxExposure: MAX_TOTAL_EXPOSURE, byCategory, warnings };
+  } catch {
+    return { totalExposure: 0, maxExposure: MAX_TOTAL_EXPOSURE, byCategory: {}, warnings: [] };
+  }
+}
+
 export function getRiskStatus() {
   checkDayReset();
+  const exposure = getExposure();
   return {
     dailyPnl,
     dailyLossLimit: DAILY_LOSS_LIMIT,
@@ -128,7 +177,8 @@ export function getRiskStatus() {
     circuitBroken,
     totalTrades,
     totalPnl,
-    dailyResetDate
+    dailyResetDate,
+    exposure
   };
 }
 

@@ -264,9 +264,17 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/admin/cache-stats", desc: "Response cache hit rate and entry count", tryable: true }
   ],
   tradingEndpoints: [
-    { method: "GET", path: "/api/trading/status", desc: "Trading bot status: API config, risk state, monitor, execution stats", tryable: true },
+    { method: "GET", path: "/api/trading/status", desc: "Trading bot status: control state, risk, exposure, monitor, executions", tryable: true },
+    { method: "POST", path: "/api/trading/control", desc: "Bot control: { action: stop|pause|resume|drain } (auth required)" },
     { method: "GET", path: "/api/trading/executions?limit=10", desc: "Recent trade executions (live + dry-run) from SQLite", tryable: true },
-    { method: "GET", path: "/api/trading/open", desc: "Currently open trade executions", tryable: true }
+    { method: "GET", path: "/api/trading/open", desc: "Currently open trade executions", tryable: true },
+    { method: "GET", path: "/api/trading/execution/:id", desc: "Get single execution by ID", tryable: false },
+    { method: "POST", path: "/api/trading/close/:id", desc: "Cancel a specific open position (auth required)" },
+    { method: "POST", path: "/api/trading/liquidate-all", desc: "Cancel all open positions + pause bot (auth required)" },
+    { method: "GET", path: "/api/trading/audit?days=7&limit=100", desc: "Query trade audit log with filters", tryable: true },
+    { method: "GET", path: "/api/trading/audit/summary?days=7", desc: "Audit event counts by type", tryable: true },
+    { method: "GET", path: "/api/trading/audit/execution/:id", desc: "Full audit trail for a specific execution", tryable: false },
+    { method: "GET", path: "/api/trading/reconcile", desc: "Position reconciliation — detect stale/orphaned positions (auth required)" }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },
