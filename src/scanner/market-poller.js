@@ -19,6 +19,9 @@ import { getBtcMacroState, computeCorrelationAdj } from "../engines/correlation.
 import { detectRegime } from "../engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "../engines/probability.js";
 import { computeEdge, decide } from "../engines/edge.js";
+import { analyzeMarketOrderFlow } from "../engines/orderflow.js";
+import { computeConfidence } from "../engines/confidence.js";
+import { computeSignalKelly } from "../engines/kelly.js";
 import { CONFIG } from "../config.js";
 
 /**
@@ -71,7 +74,8 @@ export function createMarketPoller(market) {
         orderbook: {
           up: summarizeOrderBook(yesBook),
           down: summarizeOrderBook(noBook)
-        }
+        },
+        rawBooks: { yes: yesBook, no: noBook }
       };
     } catch {
       // Fallback to gamma prices
@@ -202,6 +206,29 @@ export function createMarketPoller(market) {
 
     const signal = rec.action === "ENTER" ? (rec.side === "UP" ? "BUY YES" : "BUY NO") : "NO TRADE";
 
+    // Order flow analysis (uses raw orderbooks, not summaries)
+    const orderFlowData = snapshot.ok && snapshot.rawBooks
+      ? analyzeMarketOrderFlow(snapshot.rawBooks.yes, snapshot.rawBooks.no, prelimSide)
+      : null;
+
+    // Build partial tick for confidence scoring (needs all fields)
+    const partialTick = {
+      rec, scored, edge, timeAware, regimeInfo,
+      volRegime: volInfo.volRegime,
+      confluence: confluenceData ? { score: confluenceData.confluence, direction: confluenceData.direction } : null,
+      correlation: { adj: corrAdj.correlationAdj, reason: corrAdj.reason },
+      orderFlow: orderFlowData,
+      prices: { last: lastPrice, up: marketUp, down: marketDown }
+    };
+
+    // Confidence score (0-100, only meaningful for active signals)
+    const confidenceResult = rec.action === "ENTER" ? computeConfidence(partialTick) : null;
+    const confidence = confidenceResult?.score ?? null;
+
+    // Kelly sizing (only for active signals)
+    const kellyTick = { ...partialTick, confidence };
+    const kellyResult = rec.action === "ENTER" ? computeSignalKelly(kellyTick) : null;
+
     return {
       ok: true,
       marketId: market.id,
@@ -229,6 +256,26 @@ export function createMarketPoller(market) {
         adj: corrAdj.correlationAdj,
         reason: corrAdj.reason
       },
+      orderFlow: orderFlowData ? {
+        alignedScore: orderFlowData.alignedScore,
+        pressureLabel: orderFlowData.yes.pressureLabel,
+        flowQuality: orderFlowData.flowQuality,
+        spreadQuality: orderFlowData.spreadQuality,
+        flowSupports: orderFlowData.flowSupports,
+        flowConflicts: orderFlowData.flowConflicts,
+        totalDepth: orderFlowData.totalDepth,
+        bidWallCount: (orderFlowData.yes.bidWalls?.length ?? 0) + (orderFlowData.no.bidWalls?.length ?? 0),
+        askWallCount: (orderFlowData.yes.askWalls?.length ?? 0) + (orderFlowData.no.askWalls?.length ?? 0)
+      } : null,
+      confidence,
+      confidenceTier: confidenceResult?.tier ?? null,
+      confidenceBreakdown: confidenceResult?.breakdown ?? null,
+      kelly: kellyResult ? {
+        betPct: kellyResult.kelly.betPct,
+        kellyFull: kellyResult.kelly.kellyFull,
+        odds: kellyResult.kelly.odds,
+        sizingTier: kellyResult.sizingTier
+      } : null,
       prices: { last: lastPrice, up: marketUp, down: marketDown },
       indicators: {
         vwap: vwapNow, vwapSlope, vwapDist,

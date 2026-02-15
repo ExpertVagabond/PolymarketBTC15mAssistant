@@ -87,6 +87,10 @@ export function broadcastScannerState({ state, signals, stats }) {
         confluence: t.confluence ? t.confluence.score : null,
         confDirection: t.confluence ? t.confluence.direction : null,
         corrAdj: t.correlation?.adj ?? null,
+        confidence: t.confidence ?? null,
+        confidenceTier: t.confidenceTier ?? null,
+        orderFlow: t.orderFlow ?? null,
+        kelly: t.kelly ?? null,
         settlementLeftMin: t.settlementLeftMin ?? t.market?.settlementLeftMin ?? null,
         timestamp: t.timestamp
       });
@@ -111,7 +115,11 @@ export function broadcastScannerState({ state, signals, stats }) {
       settlementLeftMin: s.settlementLeftMin ?? s.market?.settlementLeftMin ?? null,
       volRegime: s.volRegime ?? null,
       confluence: s.confluence ?? null,
-      correlation: s.correlation ?? null
+      correlation: s.correlation ?? null,
+      confidence: s.confidence ?? null,
+      confidenceTier: s.confidenceTier ?? null,
+      orderFlow: s.orderFlow ?? null,
+      kelly: s.kelly ?? null
     })),
     markets
   });

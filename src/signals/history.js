@@ -64,7 +64,10 @@ function ensureTable() {
     ["vwap_position", "TEXT"], ["vwap_slope_dir", "TEXT"], ["rsi_zone", "TEXT"],
     ["macd_state", "TEXT"], ["heiken_color", "TEXT"], ["heiken_count", "INTEGER"],
     ["ob_zone", "TEXT"], ["vol_regime", "TEXT"], ["atr_pct", "REAL"],
-    ["bb_width", "REAL"], ["time_decay", "REAL"], ["degenerate", "INTEGER DEFAULT 0"]
+    ["bb_width", "REAL"], ["time_decay", "REAL"], ["degenerate", "INTEGER DEFAULT 0"],
+    ["confidence", "INTEGER"], ["confidence_tier", "TEXT"],
+    ["kelly_bet_pct", "REAL"], ["kelly_sizing_tier", "TEXT"],
+    ["flow_aligned_score", "INTEGER"], ["flow_quality", "TEXT"]
   ];
   for (const [col, type] of newCols) {
     if (!existingCols.includes(col)) {
@@ -80,14 +83,18 @@ function ensureTable() {
         orderbook_imbalance, settlement_left_min, liquidity,
         vwap_position, vwap_slope_dir, rsi_zone, macd_state,
         heiken_color, heiken_count, ob_zone, vol_regime, atr_pct,
-        bb_width, time_decay, degenerate
+        bb_width, time_decay, degenerate,
+        confidence, confidence_tier, kelly_bet_pct, kelly_sizing_tier,
+        flow_aligned_score, flow_quality
       ) VALUES (
         @market_id, @question, @category, @signal, @side, @strength, @phase, @regime,
         @model_up, @model_down, @market_yes, @market_no, @edge, @rsi,
         @orderbook_imbalance, @settlement_left_min, @liquidity,
         @vwap_position, @vwap_slope_dir, @rsi_zone, @macd_state,
         @heiken_color, @heiken_count, @ob_zone, @vol_regime, @atr_pct,
-        @bb_width, @time_decay, @degenerate
+        @bb_width, @time_decay, @degenerate,
+        @confidence, @confidence_tier, @kelly_bet_pct, @kelly_sizing_tier,
+        @flow_aligned_score, @flow_quality
       )
     `),
 
@@ -252,7 +259,13 @@ export function logSignal(tick) {
     orderbook_imbalance: tick.orderbookImbalance ?? null,
     settlement_left_min: tick.settlementLeftMin ?? null,
     liquidity: tick.market?.liquidity ?? null,
-    ...features
+    ...features,
+    confidence: tick.confidence ?? null,
+    confidence_tier: tick.confidenceTier ?? null,
+    kelly_bet_pct: tick.kelly?.betPct ?? null,
+    kelly_sizing_tier: tick.kelly?.sizingTier ?? null,
+    flow_aligned_score: tick.orderFlow?.alignedScore ?? null,
+    flow_quality: tick.orderFlow?.flowQuality ?? null
   });
 }
 

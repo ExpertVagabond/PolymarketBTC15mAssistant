@@ -64,6 +64,19 @@ function renderSignalCards(signals) {
     // Time remaining
     const timeLeft = fmtSettlement(s.settlementLeftMin);
 
+    // Confidence score
+    const confScore = s.confidence != null ? s.confidence : null;
+    const confTier = s.confidenceTier || "";
+    const confColor = confScore >= 80 ? "high" : confScore >= 60 ? "med" : confScore >= 40 ? "low" : "vlow";
+
+    // Kelly sizing
+    const kellyPct = s.kelly?.betPct != null ? (s.kelly.betPct * 100).toFixed(2) : null;
+
+    // Order flow
+    const flowLabel = s.orderFlow?.pressureLabel || null;
+    const flowAligned = s.orderFlow?.flowSupports;
+    const flowConflict = s.orderFlow?.flowConflicts;
+
     // Confluence badge
     const conf = s.confluence;
     const confBadge = conf ? `<span class="conf-badge conf-${conf.score}" title="${conf.direction} across ${conf.score} timeframe(s)">${conf.score}/3 TF</span>` : "";
@@ -83,14 +96,21 @@ function renderSignalCards(signals) {
       ? `Model sees ${outcomeName} at <em>${modelPct}%</em> probability, but the market is only pricing it at <em>${mktPrice}c</em>. That's a <em>+${edgePct}%</em> edge.${timeNote}`
       : `Model detects ${outcomeName} is underpriced in this market.${timeNote}`;
 
+    // Flow badge
+    const flowBadge = flowLabel && flowLabel !== "NEUTRAL"
+      ? `<span class="flow-badge flow-${flowAligned ? "pos" : flowConflict ? "neg" : "neutral"}" title="Order flow: ${flowLabel}">${flowLabel === "STRONG_BUY" || flowLabel === "STRONG_SELL" ? flowLabel.replace("_"," ") : flowLabel}</span>`
+      : "";
+
     return `
       <div class="sig-card ${cardSide} ${strClass}">
         <div class="sig-top">
           <span class="sig-action ${sideClass}">${sideLabel}</span>
           <span class="sig-badge ${badgeClass}">${str}</span>
-          ${confBadge}${volBadge}${corrNote}
+          ${confScore != null ? `<span class="confidence-pill conf-${confColor}" title="Confidence: ${confTier}">${confScore}</span>` : ""}
+          ${confBadge}${volBadge}${corrNote}${flowBadge}
         </div>
         <div class="sig-question">${esc(s.question || "Unknown market")}</div>
+        ${confScore != null ? `<div class="confidence-bar"><div class="confidence-fill conf-${confColor}" style="width:${confScore}%"></div><span class="confidence-label">${confScore}/100 Confidence</span></div>` : ""}
         <div class="sig-metrics">
           <div class="sig-metric">
             <div class="sig-metric-label">Model</div>
@@ -105,9 +125,14 @@ function renderSignalCards(signals) {
             <div class="sig-metric-value green">+${edgePct}%</div>
           </div>
           <div class="sig-metric">
-            <div class="sig-metric-label">Settles In</div>
-            <div class="sig-metric-value amber">${timeLeft}</div>
+            <div class="sig-metric-label">Kelly Bet</div>
+            <div class="sig-metric-value amber">${kellyPct != null ? kellyPct + "%" : "-"}</div>
           </div>
+        </div>
+        <div class="sig-meta">
+          <span class="sig-meta-item">Settles in <em>${timeLeft}</em></span>
+          ${s.orderFlow ? `<span class="sig-meta-item">Flow: <em>${s.orderFlow.flowQuality}</em> depth</span>` : ""}
+          ${s.orderFlow?.spreadQuality ? `<span class="sig-meta-item">Spread: <em>${s.orderFlow.spreadQuality}</em></span>` : ""}
         </div>
         <div class="sig-explain">${explain}</div>
       </div>`;
@@ -153,9 +178,17 @@ function renderMarketsTable(markets) {
     const volClass = m.volRegime === "HIGH_VOL" ? "high" : m.volRegime === "LOW_VOL" ? "low" : "normal";
 
     // Confluence
-    const confScore = m.confluence != null ? m.confluence : null;
-    const confLabel = confScore != null ? confScore + "/3" : "-";
-    const confClass = confScore === 3 ? "c3" : confScore === 2 ? "c2" : confScore >= 1 ? "c1" : "c0";
+    const mConfScore = m.confluence != null ? m.confluence : null;
+    const confLabel = mConfScore != null ? mConfScore + "/3" : "-";
+    const confClass = mConfScore === 3 ? "c3" : mConfScore === 2 ? "c2" : mConfScore >= 1 ? "c1" : "c0";
+
+    // Confidence
+    const mConf = m.confidence != null ? m.confidence : null;
+    const mConfColor = mConf >= 80 ? "high" : mConf >= 60 ? "med" : mConf >= 40 ? "low" : "vlow";
+
+    // Order flow
+    const mFlow = m.orderFlow;
+    const mFlowLabel = mFlow?.pressureLabel && mFlow.pressureLabel !== "NEUTRAL" ? mFlow.pressureLabel.replace("_"," ") : "-";
 
     // Time remaining
     const timeStr = fmtSettlement(m.settlementLeftMin);
@@ -182,7 +215,9 @@ function renderMarketsTable(markets) {
       <td><span class="edge-bar"><span class="${edgeColor}">${edgeStr}</span>${edgeWidth > 0 ? `<span class="edge-fill ${edgeFillClass}" style="width:${edgeWidth}px"></span>` : ""}</span></td>
       <td class="${rsiColor}">${rsiStr}</td>
       <td>${m.volRegime ? `<span class="vol-pill ${volClass}">${volLabel}</span>` : "-"}</td>
-      <td>${confScore != null ? `<span class="conf-pill ${confClass}">${confLabel}</span>` : "-"}</td>
+      <td>${mConfScore != null ? `<span class="conf-pill ${confClass}">${confLabel}</span>` : "-"}</td>
+      <td>${mConf != null ? `<span class="confidence-pill-sm conf-${mConfColor}">${mConf}</span>` : "-"}</td>
+      <td class="flow-cell">${mFlowLabel !== "-" ? `<span class="flow-pill ${mFlow?.flowSupports ? "pos" : mFlow?.flowConflicts ? "neg" : ""}">${mFlowLabel}</span>` : "-"}</td>
       <td class="time-val ${timeClass}">${timeStr}</td>
       <td class="liq-val">${liq}</td>
     </tr>`;

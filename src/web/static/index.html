@@ -148,6 +148,41 @@
     .conf-pill.c1 { background: #37415118; color: #6b7280; }
     .conf-pill.c0 { background: #f8717118; color: #fca5a5; }
 
+    /* ── Confidence bar (signal cards) ── */
+    .confidence-bar { height: 4px; background: #1a1a24; border-radius: 2px; margin-bottom: 10px; position: relative; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+    .confidence-fill.conf-high { background: #34d399; }
+    .confidence-fill.conf-med { background: #60a5fa; }
+    .confidence-fill.conf-low { background: #fbbf24; }
+    .confidence-fill.conf-vlow { background: #f87171; }
+    .confidence-label { position: absolute; right: 0; top: -14px; font-size: 9px; color: #4b5563; }
+
+    .confidence-pill { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+    .confidence-pill.conf-high { background: #34d39920; color: #34d399; }
+    .confidence-pill.conf-med { background: #3b82f618; color: #60a5fa; }
+    .confidence-pill.conf-low { background: #fbbf2418; color: #fbbf24; }
+    .confidence-pill.conf-vlow { background: #f8717118; color: #f87171; }
+
+    .confidence-pill-sm { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
+    .confidence-pill-sm.conf-high { background: #34d39918; color: #34d399; }
+    .confidence-pill-sm.conf-med { background: #3b82f618; color: #60a5fa; }
+    .confidence-pill-sm.conf-low { background: #fbbf2418; color: #fbbf24; }
+    .confidence-pill-sm.conf-vlow { background: #f8717118; color: #f87171; }
+
+    /* ── Order flow badges ── */
+    .flow-badge { font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 4px; margin-left: 4px; }
+    .flow-badge.flow-pos { background: #34d39918; color: #34d399; }
+    .flow-badge.flow-neg { background: #f8717118; color: #fca5a5; }
+    .flow-badge.flow-neutral { background: #37415118; color: #6b7280; }
+    .flow-pill { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }
+    .flow-pill.pos { background: #34d39918; color: #34d399; }
+    .flow-pill.neg { background: #f8717118; color: #fca5a5; }
+    .flow-cell { white-space: nowrap; }
+
+    /* ── Signal card meta row ── */
+    .sig-meta { display: flex; gap: 12px; font-size: 10px; color: #4b5563; margin-top: 8px; flex-wrap: wrap; }
+    .sig-meta-item em { color: #9ca3af; font-style: normal; font-weight: 500; }
+
     /* ── Single-market mode (legacy fallback) ── */
     #singleMode { display: none; }
     #singleMode.visible { display: block; }
@@ -253,6 +288,8 @@
             <th>RSI</th>
             <th>Vol</th>
             <th>TF</th>
+            <th>Conf</th>
+            <th>Flow</th>
             <th>Time Left</th>
             <th>Liquidity</th>
           </tr>
