@@ -111,6 +111,7 @@ let analyticsCharts = {};
 
 let simulatorLoaded = false;
 let feedLoaded = false;
+let settingsLoaded = false;
 
 function switchTab(tab) {
   // Check feature gates
@@ -124,11 +125,13 @@ function switchTab(tab) {
   $("tabPortfolio").classList.toggle("active", tab === "portfolio");
   $("tabFeed").classList.toggle("active", tab === "feed");
   $("tabSimulator").classList.toggle("active", tab === "simulator");
+  $("tabSettings").classList.toggle("active", tab === "settings");
   $("scannerMode").style.display = tab === "dashboard" ? "block" : "none";
   $("analyticsMode").style.display = tab === "analytics" ? "block" : "none";
   $("portfolioMode").style.display = tab === "portfolio" ? "block" : "none";
   $("feedMode").style.display = tab === "feed" ? "block" : "none";
   $("simulatorMode").style.display = tab === "simulator" ? "block" : "none";
+  $("settingsMode").style.display = tab === "settings" ? "block" : "none";
 
   if (tab === "analytics" && !analyticsLoaded) {
     loadAnalytics();
@@ -140,6 +143,10 @@ function switchTab(tab) {
   if (tab === "simulator" && !simulatorLoaded) {
     initSimulatorCategories();
     simulatorLoaded = true;
+  }
+  if (tab === "settings" && !settingsLoaded) {
+    loadSettings();
+    settingsLoaded = true;
   }
   if (tab === "portfolio") {
     loadPortfolio();
@@ -649,6 +656,7 @@ function connect() {
   ws.onopen = () => {
     $("statusDot").classList.add("live");
     $("statusText").textContent = "Live";
+    if ($("reconnectOverlay")) $("reconnectOverlay").style.display = "none";
   };
 
   ws.onmessage = (e) => {
@@ -667,6 +675,7 @@ function connect() {
   ws.onclose = () => {
     $("statusDot").classList.remove("live");
     $("statusText").textContent = "Reconnecting...";
+    if ($("reconnectOverlay")) $("reconnectOverlay").style.display = "flex";
     setTimeout(connect, 2000);
   };
 
@@ -1460,3 +1469,279 @@ function closeMarketModal() {
 
 window.openMarketDetail = openMarketDetail;
 window.closeMarketModal = closeMarketModal;
+
+/* ═══ Toast Notification System ═══ */
+
+function showToast(message, type = "info", durationMs = 4000) {
+  const container = $("toastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = "toast " + type;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(12px)";
+    toast.style.transition = "all 0.3s";
+    setTimeout(() => toast.remove(), 300);
+  }, durationMs);
+}
+
+window.showToast = showToast;
+
+/* ═══ Global Error Handling ═══ */
+
+window.onerror = function(msg, src, line) {
+  console.error("[global]", msg, src, line);
+  showToast("Something went wrong", "error");
+  return false;
+};
+
+window.addEventListener("unhandledrejection", function(event) {
+  console.error("[promise]", event.reason);
+  showToast("Request failed", "error");
+});
+
+async function safeFetch(url, opts) {
+  try {
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  } catch (err) {
+    showToast(err.message || "Network error", "error");
+    throw err;
+  }
+}
+
+/* ═══ Settings Tab ═══ */
+
+let settingsUser = null;
+
+async function loadSettings() {
+  // Load account info
+  try {
+    const me = await fetch("/api/auth/me").then(r => r.json());
+    if (me.email) {
+      settingsUser = me;
+      $("setEmail").textContent = me.email;
+      $("setPlan").textContent = (me.plan || "free").toUpperCase();
+      $("setLoginBtn").textContent = "Logged in";
+      $("setLoginBtn").disabled = true;
+      loadApiKeys();
+      loadWebhooks();
+      loadEmailPrefs();
+    }
+  } catch { /* not logged in */ }
+
+  // Init notification prefs from localStorage
+  initNotifPrefs();
+
+  // Init email category checkboxes
+  initEmailCategories();
+}
+
+async function settingsLogin() {
+  const email = prompt("Enter your email for a magic link:");
+  if (!email || !email.includes("@")) return;
+  try {
+    await safeFetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    showToast("Magic link sent! Check your email.", "success");
+  } catch { /* handled by safeFetch */ }
+}
+
+// API Keys
+async function loadApiKeys() {
+  try {
+    const keys = await fetch("/api/keys").then(r => r.json());
+    const el = $("apiKeysList");
+    if (!Array.isArray(keys) || keys.length === 0) {
+      el.innerHTML = '<div style="color:#4b5563;font-size:12px">No API keys yet</div>';
+      return;
+    }
+    el.innerHTML = keys.map(k => `
+      <div class="key-item">
+        <div>
+          <span class="key-prefix">${esc(k.key_prefix)}...</span>
+          <div class="key-meta">${esc(k.name || "default")} | ${k.call_count || 0} calls</div>
+        </div>
+        <button class="settings-btn danger" onclick="revokeApiKey(${k.id})">Revoke</button>
+      </div>
+    `).join("");
+  } catch { /* not logged in */ }
+}
+
+async function createApiKey() {
+  if (!settingsUser) { showToast("Login required", "error"); return; }
+  const name = prompt("Key name (optional):", "default") || "default";
+  try {
+    const result = await safeFetch("/api/keys/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    if (result.rawKey) {
+      $("apiKeyReveal").style.display = "block";
+      $("apiKeyReveal").innerHTML = `<div class="key-reveal">
+        <strong>Save this key — it won't be shown again:</strong><br>${esc(result.rawKey)}
+      </div>`;
+      showToast("API key created", "success");
+      loadApiKeys();
+    }
+  } catch { /* handled */ }
+}
+
+async function revokeApiKey(id) {
+  if (!confirm("Revoke this API key?")) return;
+  try {
+    await safeFetch(`/api/keys/${id}`, { method: "DELETE" });
+    showToast("Key revoked", "success");
+    loadApiKeys();
+  } catch { /* handled */ }
+}
+
+// Webhooks
+async function loadWebhooks() {
+  try {
+    const hooks = await fetch("/api/webhooks").then(r => r.json());
+    const el = $("webhooksList");
+    if (!Array.isArray(hooks) || hooks.length === 0) {
+      el.innerHTML = '<div style="color:#4b5563;font-size:12px">No webhooks configured</div>';
+      return;
+    }
+    el.innerHTML = hooks.map(h => `
+      <div class="webhook-item">
+        <div>
+          <div class="webhook-url">${esc(h.url)}</div>
+          <div class="webhook-stats">${h.success_count || 0} ok / ${h.fail_count || 0} fail${h.active ? "" : " (disabled)"}</div>
+        </div>
+        <button class="settings-btn danger" onclick="deleteWebhook(${h.id})">Delete</button>
+      </div>
+    `).join("");
+  } catch { /* not logged in */ }
+}
+
+async function addWebhook() {
+  if (!settingsUser) { showToast("Login required", "error"); return; }
+  const url = $("webhookUrlInput").value.trim();
+  if (!url || !url.startsWith("https://")) { showToast("URL must start with https://", "error"); return; }
+  try {
+    await safeFetch("/api/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    $("webhookUrlInput").value = "";
+    showToast("Webhook added", "success");
+    loadWebhooks();
+  } catch { /* handled */ }
+}
+
+async function deleteWebhook(id) {
+  if (!confirm("Delete this webhook?")) return;
+  try {
+    await safeFetch(`/api/webhooks/${id}`, { method: "DELETE" });
+    showToast("Webhook deleted", "success");
+    loadWebhooks();
+  } catch { /* handled */ }
+}
+
+// Email Alert Preferences
+let emailAlertsEnabled = false;
+
+function initEmailCategories() {
+  const cats = ["Bitcoin", "Ethereum", "Crypto", "Sports", "Politics", "Science", "Culture", "Other"];
+  const el = $("emailCatChecks");
+  if (!el) return;
+  el.innerHTML = cats.map(c =>
+    `<label class="cat-check"><input type="checkbox" value="${c}" checked> ${c}</label>`
+  ).join("");
+}
+
+async function loadEmailPrefs() {
+  try {
+    const prefs = await fetch("/api/email-prefs").then(r => r.json());
+    emailAlertsEnabled = !!prefs.alerts_enabled;
+    const toggle = $("emailAlertToggle");
+    if (toggle) toggle.classList.toggle("on", emailAlertsEnabled);
+    if (prefs.min_confidence != null) {
+      $("emailMinConf").value = prefs.min_confidence;
+      $("emailMinConfVal").textContent = prefs.min_confidence;
+    }
+    if (prefs.categories) {
+      const selectedCats = prefs.categories.split(",").map(c => c.trim().toLowerCase());
+      document.querySelectorAll("#emailCatChecks input").forEach(cb => {
+        cb.checked = selectedCats.includes(cb.value.toLowerCase());
+      });
+    }
+  } catch { /* not logged in */ }
+}
+
+function toggleEmailAlerts() {
+  emailAlertsEnabled = !emailAlertsEnabled;
+  $("emailAlertToggle").classList.toggle("on", emailAlertsEnabled);
+}
+
+async function saveEmailPrefs() {
+  if (!settingsUser) { showToast("Login required", "error"); return; }
+  const cats = Array.from(document.querySelectorAll("#emailCatChecks input:checked")).map(cb => cb.value);
+  try {
+    await safeFetch("/api/email-prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        alertsEnabled: emailAlertsEnabled,
+        minConfidence: Number($("emailMinConf").value),
+        categories: cats.join(",")
+      })
+    });
+    showToast("Email preferences saved", "success");
+  } catch { /* handled */ }
+}
+
+// Browser Notification Preferences
+function initNotifPrefs() {
+  const soundOn = localStorage.getItem("ps_sound") !== "off";
+  const vol = localStorage.getItem("ps_volume") || "50";
+  $("soundToggle").classList.toggle("on", soundOn);
+  $("soundVolume").value = vol;
+}
+
+function toggleSound() {
+  const isOn = $("soundToggle").classList.toggle("on");
+  localStorage.setItem("ps_sound", isOn ? "on" : "off");
+}
+
+function saveSoundPrefs() {
+  localStorage.setItem("ps_volume", $("soundVolume").value);
+}
+
+function testNotification() {
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification("PolySignal Test", { body: "This is a test notification", icon: "/icon-192.png" });
+    showToast("Test notification sent", "info");
+  } else if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().then(perm => {
+      if (perm === "granted") testNotification();
+    });
+  } else {
+    showToast("Notifications blocked by browser", "error");
+  }
+}
+
+window.settingsLogin = settingsLogin;
+window.createApiKey = createApiKey;
+window.revokeApiKey = revokeApiKey;
+window.addWebhook = addWebhook;
+window.deleteWebhook = deleteWebhook;
+window.toggleEmailAlerts = toggleEmailAlerts;
+window.saveEmailPrefs = saveEmailPrefs;
+window.toggleSound = toggleSound;
+window.saveSoundPrefs = saveSoundPrefs;
+window.testNotification = testNotification;
