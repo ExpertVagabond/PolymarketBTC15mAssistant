@@ -183,6 +183,11 @@
     .sig-meta { display: flex; gap: 12px; font-size: 10px; color: #4b5563; margin-top: 8px; flex-wrap: wrap; }
     .sig-meta-item em { color: #9ca3af; font-style: normal; font-weight: 500; }
 
+    /* ── Notify button ── */
+    .notify-btn { background: #14141e; border: 1px solid #1e1e2a; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .notify-btn:hover { border-color: #fbbf24; color: #fbbf24; }
+    .notify-btn.active { background: #fbbf2418; border-color: #fbbf24; color: #fbbf24; }
+
     /* ── Signal detail modal ── */
     .modal-overlay { position: fixed; inset: 0; background: #00000080; z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
     .modal-overlay.open { opacity: 1; pointer-events: auto; }
@@ -211,6 +216,22 @@
     .tab-btn { background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
     .tab-btn:hover { color: #a5b4fc; border-color: #3b82f630; }
     .tab-btn.active { background: #3b82f618; border-color: #3b82f6; color: #60a5fa; }
+
+    /* ── Feature gate overlay ── */
+    .gated { position: relative; pointer-events: none; }
+    .gated > *:not(.gate-overlay) { filter: blur(6px); opacity: 0.4; }
+    .gate-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; pointer-events: auto; }
+    .gate-cta { text-align: center; background: #12121aee; border: 1px solid #2a2a36; border-radius: 12px; padding: 28px 36px; max-width: 400px; }
+    .gate-cta h3 { font-size: 16px; color: #fff; margin-bottom: 6px; }
+    .gate-cta p { font-size: 12px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+    .gate-cta .upgrade-btn { display: inline-block; padding: 8px 24px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-size: 13px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; text-decoration: none; transition: opacity 0.15s; }
+    .gate-cta .upgrade-btn:hover { opacity: 0.85; }
+    .gate-cta .gate-tier { font-size: 10px; color: #4b5563; margin-top: 8px; }
+
+    .plan-badge { font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .plan-badge.free { background: #37415118; color: #6b7280; }
+    .plan-badge.basic { background: #3b82f618; color: #60a5fa; }
+    .plan-badge.pro { background: linear-gradient(135deg, #8b5cf620, #ec489920); color: #c084fc; }
 
     /* ── Analytics panel ── */
     .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 20px 28px; }
@@ -268,6 +289,9 @@
   <div class="header-right">
     <button class="tab-btn active" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="tab-btn" id="tabAnalytics" onclick="switchTab('analytics')">Analytics</button>
+    <button class="tab-btn" id="tabPortfolio" onclick="switchTab('portfolio')">Portfolio</button>
+    <span class="plan-badge free" id="planBadge">FREE</span>
+    <button class="notify-btn" id="notifyBtn" onclick="toggleNotifications()" title="Toggle alerts">Alerts: Off</button>
     <a href="/terms.html" class="header-link">Terms</a>
     <a href="/privacy.html" class="header-link">Privacy</a>
   </div>
@@ -404,6 +428,68 @@
   </div>
 </div>
 
+<!-- ═══════ PORTFOLIO MODE ═══════ -->
+<div id="portfolioMode" style="display:none">
+
+  <!-- Portfolio KPIs -->
+  <div class="summary-strip">
+    <div class="summary-item">Open Positions <span class="summary-val highlight" id="pfOpen">-</span></div>
+    <div class="summary-item">Total Exposure <span class="summary-val" id="pfExposure">-</span></div>
+    <div class="summary-item">Unrealized P&L <span class="summary-val" id="pfUnrealized">-</span></div>
+    <div class="summary-item">Realized P&L <span class="summary-val" id="pfRealized">-</span></div>
+    <div class="summary-item">Win Rate <span class="summary-val" id="pfWinRate">-</span></div>
+    <div class="summary-item">Best Trade <span class="summary-val" id="pfBest">-</span></div>
+  </div>
+
+  <!-- Open positions -->
+  <div class="table-section" style="padding-top:20px">
+    <div class="section-header">
+      <span class="section-title">Open Positions</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:200px">Market</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Current</th>
+            <th>Bet %</th>
+            <th>Conf</th>
+            <th>Unrealized</th>
+            <th>Opened</th>
+          </tr>
+        </thead>
+        <tbody id="openPositionsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recent closed -->
+  <div class="table-section">
+    <div class="section-header">
+      <span class="section-title">Recent Trades</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:200px">Market</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Bet %</th>
+            <th>P&L</th>
+            <th>Status</th>
+            <th>Closed</th>
+          </tr>
+        </thead>
+        <tbody id="recentTradesBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════ SINGLE-MARKET MODE (legacy) ═══════ -->
 <div id="singleMode">
   <div class="grid">
@@ -464,6 +550,39 @@
 <!-- Signal detail modal -->
 <div class="modal-overlay" id="signalModal" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="signalModalContent"></div>
+</div>
+
+<!-- Upgrade modal -->
+<div class="modal-overlay" id="upgradeModal" onclick="if(event.target===this)closeUpgradeModal()">
+  <div class="modal" style="max-width:440px;text-align:center">
+    <button class="modal-close" onclick="closeUpgradeModal()">&times;</button>
+    <h3 style="margin-bottom:12px">Upgrade Your Plan</h3>
+    <p style="color:#6b7280;font-size:13px;margin-bottom:20px">Unlock more features with a paid subscription.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px;background:#14141e;border:1px solid #1e1e2a;border-radius:10px;padding:16px">
+        <div style="font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:6px">BASIC</div>
+        <div style="font-size:24px;font-weight:700;color:#fff">$19<span style="font-size:12px;color:#4b5563">/mo</span></div>
+        <ul style="list-style:none;text-align:left;font-size:11px;color:#9ca3af;margin-top:10px;line-height:1.8">
+          <li>All signals + detail modal</li>
+          <li>Portfolio tracker</li>
+          <li>Desktop notifications</li>
+          <li>Telegram + Discord bots</li>
+        </ul>
+        <a href="/api/auth/login" class="upgrade-btn" style="display:block;margin-top:12px;text-align:center">Get Basic</a>
+      </div>
+      <div style="flex:1;min-width:160px;background:#14141e;border:1px solid #8b5cf640;border-radius:10px;padding:16px">
+        <div style="font-size:12px;font-weight:700;color:#c084fc;margin-bottom:6px">PRO</div>
+        <div style="font-size:24px;font-weight:700;color:#fff">$49<span style="font-size:12px;color:#4b5563">/mo</span></div>
+        <ul style="list-style:none;text-align:left;font-size:11px;color:#9ca3af;margin-top:10px;line-height:1.8">
+          <li>Everything in Basic</li>
+          <li>Analytics dashboard</li>
+          <li>Strategy simulator</li>
+          <li>CSV signal export</li>
+        </ul>
+        <a href="/api/auth/login" class="upgrade-btn" style="display:block;margin-top:12px;text-align:center;background:linear-gradient(135deg,#8b5cf6,#ec4899)">Get Pro</a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>

@@ -18,6 +18,7 @@ import { initSignalHistory, logSignal, getUnsettledSignals, recordOutcome, getSi
 import { startWeightRefresh, stopWeightRefresh, getAllWeights } from "./engines/weights.js";
 import { fetchClobPrice } from "./data/polymarket.js";
 import { sleep } from "./utils.js";
+import { initPortfolio, openPosition, updatePrices, checkSettlements } from "./portfolio/tracker.js";
 
 async function main() {
   applyGlobalProxyFromEnv();
@@ -28,8 +29,9 @@ async function main() {
   // Initialize databases + weight learning
   getDb();
   initSignalHistory();
+  initPortfolio();
   startWeightRefresh();
-  console.log("[db] Subscriber + signal history databases ready");
+  console.log("[db] Subscriber + signal history + portfolio databases ready");
 
   // Create scanner orchestrator
   const orchestrator = createOrchestrator();
@@ -42,6 +44,9 @@ async function main() {
     } catch (err) {
       console.error("[signals] Failed to log:", err.message);
     }
+
+    // Open virtual portfolio position
+    try { openPosition(tick); } catch { /* ignore */ }
 
     // Broadcast to Telegram
     tgBroadcast(tick).catch((err) => console.error("[broadcast] Telegram error:", err.message));
@@ -151,6 +156,12 @@ async function main() {
     const signals = orchestrator.getActiveSignals();
     const stats = orchestrator.getStats();
     broadcastState({ scanner: { state, signals, stats } });
+
+    // Update portfolio prices and check settlements
+    try {
+      updatePrices(state);
+      checkSettlements(state);
+    } catch { /* ignore */ }
   }, 10_000);
 
   console.log("\n[server] All systems online");

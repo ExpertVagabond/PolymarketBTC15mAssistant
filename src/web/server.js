@@ -17,8 +17,9 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
+import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -150,6 +151,34 @@ export async function startWebServer(opts = {}) {
     return { signals: rows, count: rows.length };
   });
 
+  /* ── Strategy Simulator API ── */
+
+  app.get("/api/simulate", async (req) => {
+    const filters = {};
+    if (req.query.minConfidence) filters.minConfidence = Number(req.query.minConfidence);
+    if (req.query.maxConfidence) filters.maxConfidence = Number(req.query.maxConfidence);
+    if (req.query.categories) filters.categories = req.query.categories.split(",");
+    if (req.query.strengths) filters.strengths = req.query.strengths.split(",");
+    if (req.query.minEdge) filters.minEdge = Number(req.query.minEdge);
+    if (req.query.sides) filters.sides = req.query.sides.split(",");
+    return simulateStrategy(filters);
+  });
+
+  /* ── Portfolio API ── */
+
+  app.get("/api/portfolio/positions", async () => {
+    return getOpenPositions();
+  });
+
+  app.get("/api/portfolio/summary", async () => {
+    return getPortfolioSummary();
+  });
+
+  app.get("/api/portfolio/recent", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    return getRecentPositions(limit);
+  });
+
   /* ── Learning / Feedback API ── */
 
   app.get("/api/learning/weights", async () => {
@@ -166,6 +195,16 @@ export async function startWebServer(opts = {}) {
 
   app.get("/api/learning/status", async () => {
     return getLearningStatus();
+  });
+
+  /* ── Plan check (public, returns free if not logged in) ── */
+
+  app.get("/api/plan", async (req) => {
+    const cookieToken = parseCookie(req.headers.cookie, "session");
+    const session = cookieToken ? verifySession(cookieToken) : null;
+    if (!session) return { plan: "free" };
+    const sub = getByEmail(session.email);
+    return { plan: sub?.plan || "free", email: session.email };
   });
 
   /* ── Auth routes ── */

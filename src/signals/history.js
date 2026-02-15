@@ -658,6 +658,94 @@ export function getPerformanceSummary(days = 7) {
 }
 
 /**
+ * Strategy simulator: replay settled signals through a filter to compute hypothetical performance.
+ * @param {object} filters - { minConfidence, maxConfidence, categories, strengths, minEdge, sides }
+ */
+export function simulateStrategy(filters = {}) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  // Get all settled signals
+  let settled = db.prepare(`
+    SELECT * FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    ORDER BY created_at ASC
+  `).all();
+
+  // Apply filters
+  if (filters.minConfidence != null) {
+    settled = settled.filter(s => (s.confidence ?? 0) >= filters.minConfidence);
+  }
+  if (filters.maxConfidence != null) {
+    settled = settled.filter(s => (s.confidence ?? 100) <= filters.maxConfidence);
+  }
+  if (filters.categories?.length) {
+    const cats = new Set(filters.categories.map(c => c.toLowerCase()));
+    settled = settled.filter(s => cats.has((s.category || "").toLowerCase()));
+  }
+  if (filters.strengths?.length) {
+    const str = new Set(filters.strengths.map(s => s.toUpperCase()));
+    settled = settled.filter(s => str.has((s.strength || "").toUpperCase()));
+  }
+  if (filters.minEdge != null) {
+    settled = settled.filter(s => (s.edge ?? 0) >= filters.minEdge);
+  }
+  if (filters.sides?.length) {
+    const sides = new Set(filters.sides.map(s => s.toUpperCase()));
+    settled = settled.filter(s => sides.has((s.side || "").toUpperCase()));
+  }
+
+  if (settled.length === 0) {
+    return { total: 0, wins: 0, losses: 0, winRate: null, totalPnl: 0, avgPnl: null, sharpe: null, maxDrawdown: 0, equityCurve: [], message: "No settled signals match filters" };
+  }
+
+  // Compute stats
+  let wins = 0, losses = 0, cumPnl = 0, peak = 0, maxDD = 0;
+  const pnls = [];
+  const equityCurve = [];
+
+  for (const s of settled) {
+    if (s.outcome === "WIN") wins++;
+    else losses++;
+
+    const pnl = s.pnl_pct || 0;
+    pnls.push(pnl);
+    cumPnl += pnl;
+    if (cumPnl > peak) peak = cumPnl;
+    const dd = peak - cumPnl;
+    if (dd > maxDD) maxDD = dd;
+
+    equityCurve.push({ date: s.created_at, cumPnl: Math.round(cumPnl * 100) / 100 });
+  }
+
+  const total = wins + losses;
+  const winRate = total > 0 ? (wins / total * 100).toFixed(1) : null;
+  const avgPnl = pnls.length > 0 ? pnls.reduce((a, b) => a + b, 0) / pnls.length : null;
+
+  // Sharpe ratio (simplified: mean/std of P&L per trade)
+  let sharpe = null;
+  if (pnls.length > 1) {
+    const mean = avgPnl;
+    const variance = pnls.reduce((sum, p) => sum + (p - mean) ** 2, 0) / (pnls.length - 1);
+    const std = Math.sqrt(variance);
+    sharpe = std > 0 ? Math.round((mean / std) * 100) / 100 : null;
+  }
+
+  return {
+    total,
+    wins,
+    losses,
+    winRate,
+    totalPnl: Math.round(cumPnl * 100) / 100,
+    avgPnl: avgPnl != null ? Math.round(avgPnl * 100) / 100 : null,
+    sharpe,
+    maxDrawdown: Math.round(maxDD * 100) / 100,
+    equityCurve: equityCurve.length > 200 ? equityCurve.filter((_, i) => i % Math.ceil(equityCurve.length / 200) === 0) : equityCurve,
+    filters
+  };
+}
+
+/**
  * Initialize the signal history table.
  */
 export function initSignalHistory() {

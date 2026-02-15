@@ -1,10 +1,129 @@
 /**
- * MCP tool definitions for the Polymarket BTC 15m assistant.
+ * MCP tool definitions for PolySignal.
+ * Supports both single-market (legacy) and multi-market scanner modes.
  */
 
 import { ensurePollerRunning, getCurrentState, getRecentHistory, getBacktestSummary } from "./state-provider.js";
+import { getRecentSignals, getSignalStats, getTimeSeries, getCalibration, getDrawdownStats, getPerformanceSummary, simulateStrategy } from "../signals/history.js";
+import { getOpenPositions, getPortfolioSummary } from "../portfolio/tracker.js";
+import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 
 export function registerTools(server) {
+
+  /* ── Scanner tools (multi-market) ── */
+
+  server.tool(
+    "get_active_signals",
+    "Get all active trading signals from the multi-market scanner. Returns signals with confidence, Kelly sizing, and order flow data.",
+    {},
+    async () => {
+      const signals = getRecentSignals(20);
+      const active = signals.filter(s => s.outcome == null).slice(0, 10);
+
+      if (active.length === 0) {
+        return { content: [{ type: "text", text: "No active signals right now. The scanner is monitoring markets." }] };
+      }
+
+      const compact = active.map(s => ({
+        market: s.question?.slice(0, 60),
+        category: s.category,
+        signal: s.signal,
+        side: s.side,
+        strength: s.strength,
+        edge: s.edge != null ? (s.edge * 100).toFixed(1) + "%" : null,
+        confidence: s.confidence,
+        confidence_tier: s.confidence_tier,
+        kelly_bet: s.kelly_bet_pct != null ? (s.kelly_bet_pct * 100).toFixed(2) + "%" : null,
+        flow_quality: s.flow_quality,
+        created: s.created_at
+      }));
+
+      return { content: [{ type: "text", text: JSON.stringify(compact, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_signal_stats",
+    "Get overall signal performance stats: win rate, P&L, by category and strength.",
+    {},
+    async () => {
+      const stats = getSignalStats();
+      return { content: [{ type: "text", text: JSON.stringify(stats, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_performance",
+    "Get performance summary for a time period (default 7 days): win rate, P&L, best/worst trade.",
+    { days: { type: "number", description: "Lookback period in days (default 7, max 90)" } },
+    async ({ days }) => {
+      const d = Math.min(Math.max(Number(days) || 7, 1), 90);
+      const perf = getPerformanceSummary(d);
+      return { content: [{ type: "text", text: JSON.stringify(perf, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_analytics",
+    "Get analytics data: time series stats, calibration, and drawdown analysis.",
+    { days: { type: "number", description: "Lookback period in days (default 7)" } },
+    async ({ days }) => {
+      const d = Math.min(Math.max(Number(days) || 7, 1), 90);
+      const [ts, cal, dd] = await Promise.all([
+        getTimeSeries(d),
+        getCalibration(),
+        getDrawdownStats()
+      ]);
+      return { content: [{ type: "text", text: JSON.stringify({ timeSeries: ts, calibration: cal, drawdown: { maxDrawdown: dd.maxDrawdown, maxConsecutiveLosses: dd.maxConsecutiveLosses, maxConsecutiveWins: dd.maxConsecutiveWins, currentStreak: dd.currentStreak, totalSettled: dd.totalSettled } }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_portfolio",
+    "Get virtual portfolio: open positions with unrealized P&L and portfolio summary.",
+    {},
+    async () => {
+      const positions = getOpenPositions();
+      const summary = getPortfolioSummary();
+      return { content: [{ type: "text", text: JSON.stringify({ summary, openPositions: positions.slice(0, 20) }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "simulate_strategy",
+    "Simulate a trading strategy with filters. Test 'what if I only traded HIGH confidence crypto signals?'",
+    {
+      minConfidence: { type: "number", description: "Minimum confidence score (0-100)" },
+      categories: { type: "string", description: "Comma-separated categories to include (e.g. 'Crypto,Sports')" },
+      strengths: { type: "string", description: "Comma-separated strengths (e.g. 'STRONG,GOOD')" },
+      minEdge: { type: "number", description: "Minimum edge (e.g. 0.05 for 5%)" }
+    },
+    async ({ minConfidence, categories, strengths, minEdge }) => {
+      const filters = {};
+      if (minConfidence != null) filters.minConfidence = Number(minConfidence);
+      if (categories) filters.categories = categories.split(",");
+      if (strengths) filters.strengths = strengths.split(",");
+      if (minEdge != null) filters.minEdge = Number(minEdge);
+
+      const result = simulateStrategy(filters);
+      // Trim equity curve for response size
+      const compact = { ...result, equityCurve: undefined, curvePoints: result.equityCurve?.length ?? 0 };
+      return { content: [{ type: "text", text: JSON.stringify(compact, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_learning_status",
+    "Get the ML learning engine status: model version, weight source, recent weight changes.",
+    {},
+    async () => {
+      const status = getLearningStatus();
+      return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+    }
+  );
+
+  /* ── Legacy single-market tools ── */
+
   server.tool(
     "get_current_signal",
     "Get the current BTC 15-minute prediction signal, model probabilities, and recommendation",

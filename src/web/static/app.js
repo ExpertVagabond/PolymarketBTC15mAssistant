@@ -7,26 +7,191 @@ let mode = null;
 let activeFilter = "all";
 let lastScannerData = null;
 let signalCache = {}; // keyed by market question for modal drill-down
+let notificationsEnabled = false;
+let notifiedSignals = new Set(); // track which signals we already notified
+let audioCtx = null;
+
+/* ═══ Feature Gates ═══ */
+
+let userPlan = "free"; // free | basic | pro
+
+const PLAN_GATES = {
+  free: { maxSignals: 3, maxMarkets: 10, signalModal: false, portfolio: false, analytics: false, notifications: false, simulator: false, csvExport: false },
+  basic: { maxSignals: Infinity, maxMarkets: Infinity, signalModal: true, portfolio: true, analytics: false, notifications: true, simulator: false, csvExport: false },
+  pro: { maxSignals: Infinity, maxMarkets: Infinity, signalModal: true, portfolio: true, analytics: true, notifications: true, simulator: true, csvExport: true }
+};
+
+function gates() { return PLAN_GATES[userPlan] || PLAN_GATES.free; }
+
+async function loadUserPlan() {
+  try {
+    const res = await fetch("/api/plan");
+    if (res.ok) {
+      const data = await res.json();
+      userPlan = data.plan || "free";
+    }
+  } catch { /* not logged in = free */ }
+  applyPlanUI();
+}
+
+function applyPlanUI() {
+  const badge = $("planBadge");
+  if (badge) {
+    badge.textContent = userPlan.toUpperCase();
+    badge.className = "plan-badge " + userPlan;
+  }
+
+  // Show/hide notify button based on plan
+  const notifyBtn = $("notifyBtn");
+  if (notifyBtn) notifyBtn.style.display = gates().notifications ? "" : "none";
+}
+
+function showUpgradeModal() {
+  $("upgradeModal")?.classList.add("open");
+}
+
+function closeUpgradeModal() {
+  $("upgradeModal")?.classList.remove("open");
+}
+
+window.showUpgradeModal = showUpgradeModal;
+window.closeUpgradeModal = closeUpgradeModal;
+
+function gateOverlay(requiredPlan) {
+  return `<div class="gate-overlay"><div class="gate-cta">
+    <h3>Upgrade to ${requiredPlan === "pro" ? "Pro" : "Basic"}</h3>
+    <p>${requiredPlan === "pro" ? "Analytics, strategy simulation, and CSV export require a Pro subscription." : "Full signal access, portfolio tracking, and notifications require a Basic subscription."}</p>
+    <button class="upgrade-btn" onclick="showUpgradeModal()">View Plans</button>
+    <div class="gate-tier">You're on the ${userPlan.toUpperCase()} plan</div>
+  </div></div>`;
+}
+
+loadUserPlan();
 
 /* ═══ Tab Switching ═══ */
 
 let activeTab = "dashboard";
 let analyticsLoaded = false;
+let portfolioLoaded = false;
+let portfolioRefreshTimer = null;
 let analyticsCharts = {};
 
 function switchTab(tab) {
+  // Check feature gates
+  if (tab === "analytics" && !gates().analytics) { showUpgradeModal(); return; }
+  if (tab === "portfolio" && !gates().portfolio) { showUpgradeModal(); return; }
+
   activeTab = tab;
   $("tabDashboard").classList.toggle("active", tab === "dashboard");
   $("tabAnalytics").classList.toggle("active", tab === "analytics");
+  $("tabPortfolio").classList.toggle("active", tab === "portfolio");
   $("scannerMode").style.display = tab === "dashboard" ? "block" : "none";
   $("analyticsMode").style.display = tab === "analytics" ? "block" : "none";
+  $("portfolioMode").style.display = tab === "portfolio" ? "block" : "none";
 
   if (tab === "analytics" && !analyticsLoaded) {
     loadAnalytics();
   }
+  if (tab === "portfolio") {
+    loadPortfolio();
+    if (!portfolioRefreshTimer) portfolioRefreshTimer = setInterval(loadPortfolio, 10_000);
+  } else {
+    if (portfolioRefreshTimer) { clearInterval(portfolioRefreshTimer); portfolioRefreshTimer = null; }
+  }
 }
 
 window.switchTab = switchTab;
+
+/* ═══ Notifications ═══ */
+
+function toggleNotifications() {
+  if (!gates().notifications) { showUpgradeModal(); return; }
+  if (!notificationsEnabled) {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then(perm => {
+        if (perm === "granted") enableNotifications();
+      });
+    } else if ("Notification" in window && Notification.permission === "granted") {
+      enableNotifications();
+    } else {
+      enableNotifications(); // still enable sound even without permission
+    }
+  } else {
+    notificationsEnabled = false;
+    $("notifyBtn").textContent = "Alerts: Off";
+    $("notifyBtn").classList.remove("active");
+  }
+}
+
+function enableNotifications() {
+  notificationsEnabled = true;
+  $("notifyBtn").textContent = "Alerts: On";
+  $("notifyBtn").classList.add("active");
+  // Warm up audio context on user gesture
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function checkNewSignals(signals) {
+  if (!notificationsEnabled || !signals?.length) return;
+
+  for (const s of signals) {
+    const key = s.question + "|" + s.side;
+    if (notifiedSignals.has(key)) continue;
+    notifiedSignals.add(key);
+
+    const side = s.side === "UP" ? "YES" : "NO";
+    const isStrong = (s.strength || "").toUpperCase() === "STRONG";
+
+    // Desktop notification
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(`PolySignal: BUY ${side}`, {
+        body: `${s.question?.slice(0, 60)}\nEdge: +${((s.edge ?? 0) * 100).toFixed(1)}% | Conf: ${s.confidence ?? "-"}`,
+        icon: "/favicon.ico",
+        tag: key,
+        requireInteraction: isStrong
+      });
+    }
+
+    // Sound alert
+    playAlertTone(isStrong);
+  }
+
+  // Prune old notifications (keep last 100)
+  if (notifiedSignals.size > 100) {
+    const arr = [...notifiedSignals];
+    notifiedSignals = new Set(arr.slice(-50));
+  }
+}
+
+function playAlertTone(isStrong) {
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = "sine";
+    gain.gain.value = 0.15;
+
+    if (isStrong) {
+      // Two-tone alert for STRONG signals
+      osc.frequency.value = 880;
+      osc.start();
+      osc.frequency.setValueAtTime(1100, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else {
+      // Single ping for GOOD signals
+      osc.frequency.value = 660;
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+      osc.stop(audioCtx.currentTime + 0.15);
+    }
+  } catch { /* ignore audio errors */ }
+}
+
+window.toggleNotifications = toggleNotifications;
 
 /* ═══ Scanner Mode ═══ */
 
@@ -46,6 +211,9 @@ function updateScannerUI(d) {
 
   // Build filter buttons from categories
   buildFilterBar(d.markets || []);
+
+  // Check for new signals (notifications)
+  checkNewSignals(d.signals || []);
 
   // Render signal cards
   renderSignalCards(d.signals || []);
@@ -67,10 +235,15 @@ function renderSignalCards(signals) {
     return;
   }
 
-  // Cache signal data for modal drill-down
-  signals.forEach((s, i) => { signalCache[i] = s; });
+  // Gate: limit signal cards for free users
+  const maxSig = gates().maxSignals;
+  const gatedSignals = signals.slice(0, maxSig);
+  const hiddenCount = signals.length - gatedSignals.length;
 
-  container.innerHTML = '<div class="signal-grid">' + signals.map((s, idx) => {
+  // Cache signal data for modal drill-down
+  gatedSignals.forEach((s, i) => { signalCache[i] = s; });
+
+  container.innerHTML = '<div class="signal-grid">' + gatedSignals.map((s, idx) => {
     const isYes = s.side === "UP";
     const sideLabel = isYes ? "BUY YES" : "BUY NO";
     const sideClass = isYes ? "yes" : "no";
@@ -160,10 +333,15 @@ function renderSignalCards(signals) {
         </div>
         <div class="sig-explain">${explain}</div>
       </div>`;
-  }).join("") + '</div>';
+  }).join("") + '</div>'
+    + (hiddenCount > 0 ? `<div style="text-align:center;padding:16px;color:#4b5563;font-size:12px">
+      +${hiddenCount} more signal${hiddenCount > 1 ? "s" : ""} hidden.
+      <button onclick="showUpgradeModal()" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;font-weight:600;text-decoration:underline">Upgrade to see all</button>
+    </div>` : "");
 }
 
 function renderMarketsTable(markets) {
+  const maxMkt = gates().maxMarkets;
   const filtered = markets
     .filter((m) => activeFilter === "all" || m.category === activeFilter)
     .sort((a, b) => {
@@ -173,7 +351,10 @@ function renderMarketsTable(markets) {
       return (b.liquidity || 0) - (a.liquidity || 0);
     });
 
-  $("marketsBody").innerHTML = filtered.map((m) => {
+  const displayed = filtered.slice(0, maxMkt);
+  const hiddenMkts = filtered.length - displayed.length;
+
+  $("marketsBody").innerHTML = displayed.map((m) => {
     const hasSignal = m.signal && m.signal !== "NO TRADE";
     const cat = m.category || "other";
     const catSlug = cat.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -245,7 +426,11 @@ function renderMarketsTable(markets) {
       <td class="time-val ${timeClass}">${timeStr}</td>
       <td class="liq-val">${liq}</td>
     </tr>`;
-  }).join("");
+  }).join("")
+    + (hiddenMkts > 0 ? `<tr><td colspan="13" style="text-align:center;color:#4b5563;padding:12px;font-size:12px">
+      +${hiddenMkts} more market${hiddenMkts > 1 ? "s" : ""} hidden.
+      <button onclick="showUpgradeModal()" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;font-weight:600;text-decoration:underline">Upgrade to see all</button>
+    </td></tr>` : "");
 }
 
 /* ── Filter bar ── */
@@ -444,6 +629,7 @@ connect();
 /* ═══ Signal Detail Modal ═══ */
 
 function openSignalModal(idx) {
+  if (!gates().signalModal) { showUpgradeModal(); return; }
   const s = signalCache[idx];
   if (!s) return;
 
@@ -760,6 +946,83 @@ function renderVolumeChart(ts) {
       plugins: { ...CHART_DEFAULTS.plugins, legend: { display: true, labels: { color: "#6b7280", font: { size: 10 } } } }
     }
   });
+}
+
+/* ═══ Portfolio ═══ */
+
+async function loadPortfolio() {
+  try {
+    const [summary, positions, recent] = await Promise.all([
+      fetch("/api/portfolio/summary").then(r => r.json()),
+      fetch("/api/portfolio/positions").then(r => r.json()),
+      fetch("/api/portfolio/recent?limit=30").then(r => r.json())
+    ]);
+
+    renderPortfolioKPIs(summary);
+    renderOpenPositions(positions);
+    renderRecentTrades(recent);
+    portfolioLoaded = true;
+  } catch (err) {
+    console.error("[portfolio] Load failed:", err);
+  }
+}
+
+function renderPortfolioKPIs(s) {
+  $("pfOpen").textContent = s.open_count ?? 0;
+  $("pfExposure").textContent = s.total_exposure != null ? (s.total_exposure * 100).toFixed(1) + "%" : "-";
+
+  const unr = s.totalUnrealized ?? 0;
+  $("pfUnrealized").textContent = (unr >= 0 ? "+" : "") + unr.toFixed(2) + "%";
+  $("pfUnrealized").className = "summary-val" + (unr >= 0 ? " highlight" : "");
+
+  const real = s.realized_pnl ?? 0;
+  $("pfRealized").textContent = (real >= 0 ? "+" : "") + real.toFixed(2) + "%";
+  $("pfRealized").className = "summary-val" + (real >= 0 ? " highlight" : "");
+
+  $("pfWinRate").textContent = s.winRate ? s.winRate + "%" : "-";
+  $("pfBest").textContent = s.best_trade != null ? "+" + s.best_trade.toFixed(1) + "%" : "-";
+}
+
+function renderOpenPositions(positions) {
+  $("openPositionsBody").innerHTML = positions.length === 0
+    ? '<tr><td colspan="8" style="text-align:center;color:#4b5563;padding:20px">No open positions. Signals will auto-open virtual positions.</td></tr>'
+    : positions.map(p => {
+      const side = p.side === "UP" ? "YES" : "NO";
+      const pnlColor = p.unrealizedPnl >= 0 ? "#34d399" : "#f87171";
+      const opened = p.opened_at ? new Date(p.opened_at).toLocaleTimeString() : "-";
+      return `<tr>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.question)}">${esc(truncQ(p.question, 45))}</td>
+        <td><span class="sig-cell ${p.side === 'UP' ? 'active' : ''}">${side}</span></td>
+        <td>${(p.entry_price * 100).toFixed(0)}c</td>
+        <td>${(p.current_price * 100).toFixed(0)}c</td>
+        <td style="color:#fbbf24">${(p.bet_pct * 100).toFixed(2)}%</td>
+        <td>${p.confidence ?? "-"}</td>
+        <td style="color:${pnlColor};font-weight:600">${p.unrealizedPnl >= 0 ? "+" : ""}${p.unrealizedPnl.toFixed(2)}%</td>
+        <td style="color:#4b5563">${opened}</td>
+      </tr>`;
+    }).join("");
+}
+
+function renderRecentTrades(trades) {
+  const closed = trades.filter(t => t.status === "closed");
+  $("recentTradesBody").innerHTML = closed.length === 0
+    ? '<tr><td colspan="8" style="text-align:center;color:#4b5563;padding:20px">No closed trades yet.</td></tr>'
+    : closed.map(t => {
+      const side = t.side === "UP" ? "YES" : "NO";
+      const pnl = t.pnl_pct != null ? (t.pnl_pct >= 0 ? "+" : "") + t.pnl_pct.toFixed(2) + "%" : "-";
+      const pnlColor = (t.pnl_pct ?? 0) >= 0 ? "#34d399" : "#f87171";
+      const closedAt = t.closed_at ? new Date(t.closed_at).toLocaleDateString() : "-";
+      return `<tr>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.question)}">${esc(truncQ(t.question, 45))}</td>
+        <td><span class="sig-cell ${t.side === 'UP' ? 'active' : ''}">${side}</span></td>
+        <td>${(t.entry_price * 100).toFixed(0)}c</td>
+        <td>${(t.current_price * 100).toFixed(0)}c</td>
+        <td style="color:#fbbf24">${(t.bet_pct * 100).toFixed(2)}%</td>
+        <td style="color:${pnlColor};font-weight:600">${pnl}</td>
+        <td>${t.close_reason || "settled"}</td>
+        <td style="color:#4b5563">${closedAt}</td>
+      </tr>`;
+    }).join("");
 }
 
 async function renderSettledTable() {
