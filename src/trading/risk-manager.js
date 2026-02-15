@@ -114,26 +114,64 @@ export function getBetSize(edge) {
 }
 
 /**
+ * Get recent trade streak info (consecutive wins or losses).
+ * Queries the last N closed executions to detect hot/cold streaks.
+ * @returns {{ streak: number, direction: 'win'|'loss'|'none', multiplier: number }}
+ */
+export function getStreakMultiplier() {
+  try {
+    const rows = getDb().prepare(
+      "SELECT pnl_usd FROM trade_executions WHERE status = 'closed' AND pnl_usd IS NOT NULL ORDER BY closed_at DESC LIMIT 10"
+    ).all();
+
+    if (rows.length < 2) return { streak: 0, direction: "none", multiplier: 1.0 };
+
+    let streak = 0;
+    const firstDir = rows[0].pnl_usd >= 0 ? "win" : "loss";
+    for (const row of rows) {
+      const dir = row.pnl_usd >= 0 ? "win" : "loss";
+      if (dir === firstDir) streak++;
+      else break;
+    }
+
+    let multiplier = 1.0;
+    if (firstDir === "loss") {
+      if (streak >= 5) multiplier = 0.25;
+      else if (streak >= 3) multiplier = 0.5;
+    } else if (firstDir === "win" && streak >= 3) {
+      multiplier = Math.min(1.2, 1.0 + streak * 0.033); // cap at 1.2x
+    }
+
+    return { streak, direction: firstDir, multiplier };
+  } catch {
+    return { streak: 0, direction: "none", multiplier: 1.0 };
+  }
+}
+
+/**
  * Kelly-aware bet sizing. Uses computeSignalKelly when a full tick is available.
  * Falls back to naive edge-proportional sizing if Kelly returns 0 or data is missing.
+ * Applies streak-adaptive multiplier: cold streak → reduce, hot streak → modest boost.
  * @param {object} tick - Full tick from poller/scanner (needs rec, prices, timeAware)
  * @param {number} bankroll - Current bankroll in USD (for converting betPct to dollars)
- * @returns {{ amount: number, method: string, kelly: object|null, sizingTier: string|null }}
+ * @returns {{ amount: number, method: string, kelly: object|null, sizingTier: string|null, streakMult: number }}
  */
 export function getKellyBetSize(tick, bankroll = 100) {
   const edge = tick.rec?.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
   const naiveFallback = getBetSize(edge ?? 0.1);
 
+  const streakInfo = getStreakMultiplier();
+  const sm = streakInfo.multiplier;
+
   try {
     const { kelly, sizingTier } = computeSignalKelly(tick);
     if (kelly.reason === "ok" && kelly.betPct > 0) {
-      const kellyAmount = Math.min(MAX_BET(), Math.max(0.1, kelly.betPct * bankroll));
-      return { amount: kellyAmount, method: "kelly", kelly, sizingTier };
+      const kellyAmount = Math.min(MAX_BET(), Math.max(0.1, kelly.betPct * bankroll * sm));
+      return { amount: kellyAmount, method: "kelly", kelly, sizingTier, streakMult: sm };
     }
-    // Kelly returned 0 — use naive fallback
-    return { amount: naiveFallback, method: "naive", kelly, sizingTier };
+    return { amount: Math.max(0.1, naiveFallback * sm), method: "naive", kelly, sizingTier, streakMult: sm };
   } catch {
-    return { amount: naiveFallback, method: "naive", kelly: null, sizingTier: null };
+    return { amount: Math.max(0.1, naiveFallback * sm), method: "naive", kelly: null, sizingTier: null, streakMult: sm };
   }
 }
 
@@ -206,7 +244,8 @@ export function getRiskStatus() {
     totalTrades,
     totalPnl,
     dailyResetDate,
-    exposure
+    exposure,
+    streak: getStreakMultiplier()
   };
 }
 

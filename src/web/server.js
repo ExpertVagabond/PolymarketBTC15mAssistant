@@ -46,7 +46,7 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
@@ -797,6 +797,28 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/analytics", async () => {
     return getTradeAnalytics();
+  });
+
+  app.get("/api/trading/hourly-stats", async () => {
+    return getHourlyWinRates();
+  });
+
+  app.get("/api/trading/quality-stats", async () => {
+    // Quality distribution from recent executions (parse from audit log detail)
+    const recent = getRecentExecutions(200);
+    const buckets = { "0-29": 0, "30-49": 0, "50-69": 0, "70-89": 0, "90-100": 0 };
+    let withQuality = 0;
+    for (const exec of recent) {
+      if (!exec.liquidity_check) continue; // quality stored in execution detail
+      try {
+        // Quality is logged in audit events, approximate from confidence + edge
+        const q = exec.confidence ?? 0;
+        const bucket = q < 30 ? "0-29" : q < 50 ? "30-49" : q < 70 ? "50-69" : q < 90 ? "70-89" : "90-100";
+        buckets[bucket]++;
+        withQuality++;
+      } catch { /* skip */ }
+    }
+    return { total: recent.length, withQuality, distribution: buckets };
   });
 
   app.get("/api/trading/audit", async (req) => {

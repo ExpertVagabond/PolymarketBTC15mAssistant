@@ -11,11 +11,12 @@ import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
 import { placeMarketOrderWithRetry, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
-import { logExecution, failExecution, hasOpenPositionOnMarket, isMarketOnCooldown } from "./execution-log.js";
+import { logExecution, failExecution, hasOpenPositionOnMarket, isMarketOnCooldown, isCorrelatedWithOpenPosition, getHourWinRate } from "./execution-log.js";
 import { checkBalance, invalidateBalanceCache } from "./wallet.js";
 import { logAuditEvent } from "./audit-log.js";
 import { getConfigValue } from "./trading-config.js";
 import { broadcastTradeEvent } from "../web/ws-handler.js";
+import { computeSignalQuality } from "../engines/signal-quality.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
@@ -69,6 +70,15 @@ async function processSignal(tick) {
     return;
   }
 
+  // Correlation guard: skip if open position on a similar market
+  const question = tick.market?.question || tick.question || null;
+  const category = tick.market?.category || tick.category || null;
+  const corrCheck = isCorrelatedWithOpenPosition(category, question);
+  if (corrCheck.correlated) {
+    console.log(`[scanner-trader] SKIP: correlated with exec #${corrCheck.matchedExecId} | ${corrCheck.matchedQuestion?.slice(0, 40)}`);
+    return;
+  }
+
   // Settlement time filter: skip markets settling too soon
   const settlementLeftMin = tick.settlementLeftMin ?? tick.market?.settlementLeftMin ?? null;
   const minSettlementMin = getConfigValue("min_settlement_minutes");
@@ -87,7 +97,22 @@ async function processSignal(tick) {
     return;
   }
 
-  const category = tick.market?.category || tick.category || null;
+  // Regime filter: skip CHOP markets, reduce size in RANGE
+  const regime = tick.regimeInfo?.regime || "RANGE";
+  if (regime === "CHOP") {
+    console.log(`[scanner-trader] SKIP: CHOP regime | ${tick.market?.slug || marketId}`);
+    return;
+  }
+  const regimeMultiplier = regime === "RANGE" ? 0.5 : 1.0;
+
+  // Time-of-day modifier: reduce sizing in historically bad hours
+  const currentHour = new Date().getUTCHours();
+  const hourStats = getHourWinRate(currentHour);
+  let hourMultiplier = 1.0;
+  if (hourStats && hourStats.sampleSize >= 10) {
+    if (hourStats.winRate < 40) hourMultiplier = 0.7;
+    else if (hourStats.winRate > 65) hourMultiplier = 1.1;
+  }
 
   // Check risk limits (with category for concentration check)
   const riskCheck = canTrade(category);
@@ -99,7 +124,7 @@ async function processSignal(tick) {
 
   const edge = rec.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
   const sizing = getKellyBetSize(tick);
-  const betSize = sizing.amount;
+  const betSize = Math.max(0.1, sizing.amount * regimeMultiplier * hourMultiplier);
   const tokenId = rec.side === "UP"
     ? (tick.poly?.tokens?.upTokenId || tick.tokens?.upTokenId)
     : (tick.poly?.tokens?.downTokenId || tick.tokens?.downTokenId);
@@ -107,9 +132,16 @@ async function processSignal(tick) {
     ? (tick.prices?.up ?? 0.5)
     : (tick.prices?.down ?? 0.5);
   const confidence = tick.confidence ?? null;
-  const question = tick.market?.question || tick.question || null;
 
-  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""})`);
+  // Composite signal quality gate
+  const qualityResult = computeSignalQuality(tick, { streakMultiplier: sizing.streakMult ?? 1.0, hourMultiplier, regimeMultiplier });
+  const quality = qualityResult.quality;
+  if (quality < 30) {
+    console.log(`[scanner-trader] SKIP: quality too low (${quality}/100) | ${tick.market?.slug || marketId}`);
+    return;
+  }
+
+  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""})`);
 
   // Dry run path
   if (!ENABLED || DRY_RUN) {
@@ -122,8 +154,8 @@ async function processSignal(tick) {
     registerTrade({ signalId: Date.now(), marketId, tokenId: tokenId || "", side: rec.side, entryPrice, betSize, dryRun: true, executionId: execId });
     recordTradeOpen();
     tradeCount++;
-    logAuditEvent("POSITION_OPENED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: entryPrice, dryRun: true });
-    broadcastTradeEvent("POSITION_OPENED", { executionId: execId, marketId, question, side: rec.side, strength: rec.strength, amount: betSize, price: entryPrice, dryRun: true, sizing: sizing.method });
+    logAuditEvent("POSITION_OPENED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: entryPrice, dryRun: true, detail: { quality, regime } });
+    broadcastTradeEvent("POSITION_OPENED", { executionId: execId, marketId, question, side: rec.side, strength: rec.strength, amount: betSize, price: entryPrice, dryRun: true, sizing: sizing.method, quality, regime });
     console.log(`  -> DRY RUN logged (exec #${execId})`);
     return;
   }

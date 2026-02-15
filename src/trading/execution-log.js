@@ -184,6 +184,44 @@ export function isMarketOnCooldown(marketId, cooldownMinutes = 5) {
 }
 
 /**
+ * Check if a new trade would be correlated with an existing open position.
+ * Two markets are correlated if: same category AND question text overlap > 60%.
+ * @param {string} category - Market category
+ * @param {string} question - Market question text
+ * @returns {{ correlated: boolean, matchedExecId: number|null, matchedQuestion: string|null }}
+ */
+export function isCorrelatedWithOpenPosition(category, question) {
+  ensureTable();
+  if (!category || !question) return { correlated: false, matchedExecId: null, matchedQuestion: null };
+
+  const openInCategory = getDb().prepare(
+    "SELECT id, question FROM trade_executions WHERE status = 'open' AND category = ?"
+  ).all(category);
+
+  if (openInCategory.length === 0) return { correlated: false, matchedExecId: null, matchedQuestion: null };
+
+  // Token-based similarity: split into words, measure overlap
+  const newTokens = new Set(question.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
+  if (newTokens.size === 0) return { correlated: false, matchedExecId: null, matchedQuestion: null };
+
+  for (const exec of openInCategory) {
+    if (!exec.question) continue;
+    const existTokens = new Set(exec.question.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(t => t.length > 2));
+    if (existTokens.size === 0) continue;
+
+    let overlap = 0;
+    for (const t of newTokens) { if (existTokens.has(t)) overlap++; }
+    const similarity = overlap / Math.min(newTokens.size, existTokens.size);
+
+    if (similarity >= 0.6) {
+      return { correlated: true, matchedExecId: exec.id, matchedQuestion: exec.question };
+    }
+  }
+
+  return { correlated: false, matchedExecId: null, matchedQuestion: null };
+}
+
+/**
  * Get trade execution stats.
  */
 export function getExecutionStats() {
@@ -215,6 +253,51 @@ export function cancelAllOpenExecutions() {
     "UPDATE trade_executions SET status = 'cancelled', close_reason = 'admin_liquidate_all', closed_at = datetime('now') WHERE status = 'open'"
   ).run();
   return { ok: true, cancelled: info.changes, positions: open };
+}
+
+/**
+ * Get win rates grouped by hour-of-day (0-23 UTC).
+ * Returns array of { hour, trades, wins, losses, winRate }.
+ */
+export function getHourlyWinRates() {
+  ensureTable();
+  return getDb().prepare(`
+    SELECT
+      CAST(strftime('%H', opened_at) AS INTEGER) as hour,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(
+        CAST(SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) + SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END), 0) * 100,
+        1
+      ) as win_rate,
+      ROUND(SUM(pnl_usd), 4) as total_pnl
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL
+    GROUP BY CAST(strftime('%H', opened_at) AS INTEGER)
+    ORDER BY hour
+  `).all();
+}
+
+/**
+ * Get win rate for a specific hour (0-23 UTC).
+ * Returns { winRate, sampleSize } or null if insufficient data.
+ */
+export function getHourWinRate(hour) {
+  ensureTable();
+  const row = getDb().prepare(`
+    SELECT
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL
+      AND CAST(strftime('%H', opened_at) AS INTEGER) = ?
+  `).get(hour);
+  if (!row) return null;
+  const total = (row.wins || 0) + (row.losses || 0);
+  if (total < 5) return null; // insufficient sample
+  return { winRate: (row.wins / total) * 100, sampleSize: total };
 }
 
 /**
