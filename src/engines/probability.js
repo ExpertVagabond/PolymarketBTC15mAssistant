@@ -1,4 +1,5 @@
 import { clamp } from "../utils.js";
+import { getWeight } from "./weights.js";
 
 export function scoreDirection(inputs) {
   const {
@@ -26,7 +27,6 @@ export function scoreDirection(inputs) {
   // If indicators are degenerate, skip momentum/trend scoring entirely
   // and only use orderbook imbalance (real market signal)
   if (indicatorsDegenerate) {
-    // Only orderbook imbalance carries real signal on flat-price markets
     if (orderbookImbalance != null && orderbookImbalance > 0) {
       if (orderbookImbalance > 1.5) { up += 1; }
       else if (orderbookImbalance > 1.2) { up += 1; }
@@ -37,57 +37,74 @@ export function scoreDirection(inputs) {
     return { upScore: up, downScore: down, rawUp, degenerate: true };
   }
 
+  // --- Dynamic weights: each indicator's score is multiplied by a
+  // learned weight based on how well that indicator state predicts wins.
+  // Starts at 1.0 (neutral) and shifts toward 0.5-1.5 as outcomes accumulate. ---
+
   // VWAP position
   if (price !== null && vwap !== null) {
-    if (price > vwap) up += 2;
-    if (price < vwap) down += 2;
+    const vwapPos = price > vwap ? "ABOVE" : price < vwap ? "BELOW" : "AT";
+    const w = getWeight("vwap_position", vwapPos);
+    if (price > vwap) up += 2 * w;
+    if (price < vwap) down += 2 * w;
   }
 
   // VWAP slope (trend direction)
   if (vwapSlope !== null) {
-    if (vwapSlope > 0) up += 2;
-    if (vwapSlope < 0) down += 2;
+    const slopeDir = vwapSlope > 0 ? "UP" : vwapSlope < 0 ? "DOWN" : "FLAT";
+    const w = getWeight("vwap_slope_dir", slopeDir);
+    if (vwapSlope > 0) up += 2 * w;
+    if (vwapSlope < 0) down += 2 * w;
   }
 
   // RSI momentum
   if (rsi !== null && rsiSlope !== null) {
-    if (rsi > 55 && rsiSlope > 0) up += 2;
-    if (rsi < 45 && rsiSlope < 0) down += 2;
+    const rsiZone = rsi >= 70 ? "OVERBOUGHT" : rsi >= 55 ? "BULLISH" : rsi > 45 ? "NEUTRAL" : rsi > 30 ? "BEARISH" : "OVERSOLD";
+    const w = getWeight("rsi_zone", rsiZone);
+    if (rsi > 55 && rsiSlope > 0) up += 2 * w;
+    if (rsi < 45 && rsiSlope < 0) down += 2 * w;
   }
 
   // MACD histogram expansion
   if (macd != null && macd.hist != null && macd.histDelta != null) {
     const expandingGreen = macd.hist > 0 && macd.histDelta > 0;
     const expandingRed = macd.hist < 0 && macd.histDelta < 0;
-    if (expandingGreen) up += 2;
-    if (expandingRed) down += 2;
+    let macdState = "ZERO";
+    if (expandingGreen) macdState = "EXPANDING_GREEN";
+    else if (macd.hist > 0) macdState = "FADING_GREEN";
+    else if (expandingRed) macdState = "EXPANDING_RED";
+    else if (macd.hist < 0) macdState = "FADING_RED";
+    const w = getWeight("macd_state", macdState);
 
-    if (macd.macd > 0) up += 1;
-    if (macd.macd < 0) down += 1;
+    if (expandingGreen) up += 2 * w;
+    if (expandingRed) down += 2 * w;
+    if (macd.macd > 0) up += 1 * w;
+    if (macd.macd < 0) down += 1 * w;
   }
 
   // Heiken Ashi streak
   if (heikenColor) {
-    if (heikenColor === "green" && heikenCount >= 2) up += 1;
-    if (heikenColor === "red" && heikenCount >= 2) down += 1;
+    const w = getWeight("heiken_color", heikenColor);
+    if (heikenColor === "green" && heikenCount >= 2) up += 1 * w;
+    if (heikenColor === "red" && heikenCount >= 2) down += 1 * w;
   }
 
   // Failed VWAP reclaim (bearish reversal pattern)
   if (failedVwapReclaim === true) down += 3;
 
-  // Orderbook imbalance — bid/ask volume ratio from Polymarket CLOB
-  // imbalance > 1.0 means more bid volume (buying pressure = bullish for YES)
-  // imbalance < 1.0 means more ask volume (selling pressure = bearish for YES)
+  // Orderbook imbalance
   if (orderbookImbalance != null && orderbookImbalance > 0) {
-    if (orderbookImbalance > 1.5) {
-      up += 2;    // Strong buy pressure
-    } else if (orderbookImbalance > 1.2) {
-      up += 1;    // Moderate buy pressure
-    } else if (orderbookImbalance < 0.67) {
-      down += 2;  // Strong sell pressure
-    } else if (orderbookImbalance < 0.83) {
-      down += 1;  // Moderate sell pressure
-    }
+    const obZone = orderbookImbalance > 1.5 ? "STRONG_BID"
+      : orderbookImbalance > 1.2 ? "BID"
+      : orderbookImbalance < 0.67 ? "STRONG_ASK"
+      : orderbookImbalance < 0.83 ? "ASK"
+      : "BALANCED";
+    const w = getWeight("ob_zone", obZone);
+
+    if (orderbookImbalance > 1.5) up += 2 * w;
+    else if (orderbookImbalance > 1.2) up += 1 * w;
+    else if (orderbookImbalance < 0.67) down += 2 * w;
+    else if (orderbookImbalance < 0.83) down += 1 * w;
   }
 
   const rawUp = up / (up + down);

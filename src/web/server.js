@@ -17,7 +17,8 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates } from "../signals/history.js";
+import { getAllWeights } from "../engines/weights.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -95,6 +96,20 @@ export async function startWebServer(opts = {}) {
 
   app.get("/api/signals/stats", async () => {
     return getSignalStats();
+  });
+
+  /* ── Learning / Feedback API ── */
+
+  app.get("/api/learning/weights", async () => {
+    return getAllWeights();
+  });
+
+  app.get("/api/learning/features", async () => {
+    return getFeatureWinRates(5);
+  });
+
+  app.get("/api/learning/combos", async () => {
+    return getComboWinRates(5);
   });
 
   /* ── Auth routes ── */

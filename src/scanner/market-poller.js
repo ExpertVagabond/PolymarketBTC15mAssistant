@@ -13,6 +13,7 @@ import { computeSessionVwap, computeVwapSeries } from "../indicators/vwap.js";
 import { computeRsi, sma, slopeLast } from "../indicators/rsi.js";
 import { computeMacd } from "../indicators/macd.js";
 import { computeHeikenAshi, countConsecutive } from "../indicators/heikenAshi.js";
+import { computeATR, computeBollingerWidth, classifyVolatility } from "../indicators/volatility.js";
 import { detectRegime } from "../engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "../engines/probability.js";
 import { computeEdge, decide } from "../engines/edge.js";
@@ -150,6 +151,11 @@ export function createMarketPoller(market) {
       ? obUp.bidLiquidity / obUp.askLiquidity
       : null;
 
+    // Volatility indicators
+    const atrData = computeATR(candles, 14);
+    const bbData = computeBollingerWidth(closes, 20, 2);
+    const volInfo = atrData ? classifyVolatility(atrData.atrPct, market.category) : { volRegime: "NORMAL_VOL", volMultiplier: 1.0 };
+
     // Indicator horizon: how far out current indicators are useful (minutes)
     // This is the "sweet spot" where indicators are most predictive.
     // Beyond this, sqrt decay reduces confidence gradually.
@@ -165,7 +171,13 @@ export function createMarketPoller(market) {
     const marketUp = snapshot.ok ? snapshot.prices.up : null;
     const marketDown = snapshot.ok ? snapshot.prices.down : null;
     const edge = computeEdge({ modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown, marketYes: marketUp, marketNo: marketDown });
-    const rec = decide({ remainingMinutes: timeLeftMin, edgeUp: edge.edgeUp, edgeDown: edge.edgeDown, modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown, regime: regimeInfo.regime, category: market.category });
+    const rec = decide({
+      remainingMinutes: timeLeftMin,
+      edgeUp: edge.edgeUp, edgeDown: edge.edgeDown,
+      modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown,
+      regime: regimeInfo.regime, category: market.category,
+      volMultiplier: volInfo.volMultiplier
+    });
 
     const signal = rec.action === "ENTER" ? (rec.side === "UP" ? "BUY YES" : "BUY NO") : "NO TRADE";
 
@@ -183,12 +195,20 @@ export function createMarketPoller(market) {
       regimeInfo,
       edge,
       orderbookImbalance,
+      volRegime: volInfo.volRegime,
+      atrPct: atrData?.atrPct ?? null,
+      bbWidth: bbData?.width ?? null,
+      bbSqueeze: bbData?.squeeze ?? false,
       prices: { last: lastPrice, up: marketUp, down: marketDown },
       indicators: {
         vwap: vwapNow, vwapSlope, vwapDist,
         rsi: rsiNow, rsiMa, rsiSlope,
         macd,
-        heiken: { color: consec.color, count: consec.count }
+        heiken: { color: consec.color, count: consec.count },
+        atr: atrData?.atr ?? null,
+        atrPct: atrData?.atrPct ?? null,
+        bbWidth: bbData?.width ?? null,
+        bbSqueeze: bbData?.squeeze ?? false
       },
       market: {
         up: marketUp, down: marketDown,

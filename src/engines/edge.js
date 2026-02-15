@@ -67,7 +67,8 @@ export function decide({
   modelUp = null,
   modelDown = null,
   regime = null,
-  category = null
+  category = null,
+  volMultiplier = 1.0
 }) {
   const phase = remainingMinutes > 10 ? "EARLY" : remainingMinutes > 5 ? "MID" : "LATE";
 
@@ -82,7 +83,9 @@ export function decide({
 
   // Apply regime adjustments
   const regimeAdj = getRegimeAdjustment(regime);
-  const threshold = baseEdge * regimeAdj.edgeMult;
+
+  // Apply volatility adjustment: high vol = require bigger edge, low vol = accept smaller
+  const threshold = baseEdge * regimeAdj.edgeMult * volMultiplier;
   const minProb = Math.min(baseProb * regimeAdj.probMult, 0.85); // Cap at 85%
 
   if (edgeUp === null || edgeDown === null) {

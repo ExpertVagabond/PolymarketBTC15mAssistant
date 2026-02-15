@@ -15,6 +15,7 @@ import { broadcastState } from "./web/ws-handler.js";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
 import { getDb, closeDb } from "./subscribers/db.js";
 import { initSignalHistory, logSignal, getUnsettledSignals, recordOutcome, getSignalStats } from "./signals/history.js";
+import { startWeightRefresh, stopWeightRefresh, getAllWeights } from "./engines/weights.js";
 import { fetchClobPrice } from "./data/polymarket.js";
 import { sleep } from "./utils.js";
 
@@ -24,9 +25,10 @@ async function main() {
   console.log("=== PolySignal ===");
   console.log(`Starting at ${new Date().toISOString()}\n`);
 
-  // Initialize databases
+  // Initialize databases + weight learning
   getDb();
   initSignalHistory();
+  startWeightRefresh();
   console.log("[db] Subscriber + signal history databases ready");
 
   // Create scanner orchestrator
@@ -158,6 +160,7 @@ async function main() {
   const shutdown = async () => {
     console.log("\n[server] Shutting down...");
     orchestrator.stop();
+    stopWeightRefresh();
     closeDb();
     process.exit(0);
   };

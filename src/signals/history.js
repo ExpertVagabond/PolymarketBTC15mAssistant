@@ -36,7 +36,20 @@ function ensureTable() {
       outcome_price_yes REAL,
       outcome_price_no REAL,
       settled_at TEXT,
-      pnl_pct REAL
+      pnl_pct REAL,
+      -- Indicator snapshot features (for feedback learning)
+      vwap_position TEXT,
+      vwap_slope_dir TEXT,
+      rsi_zone TEXT,
+      macd_state TEXT,
+      heiken_color TEXT,
+      heiken_count INTEGER,
+      ob_zone TEXT,
+      vol_regime TEXT,
+      atr_pct REAL,
+      bb_width REAL,
+      time_decay REAL,
+      degenerate INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_signal_market ON signal_history(market_id);
@@ -45,16 +58,36 @@ function ensureTable() {
     CREATE INDEX IF NOT EXISTS idx_signal_outcome ON signal_history(outcome);
   `);
 
+  // Add columns to existing tables (safe: ALTER TABLE ADD COLUMN is a no-op if column exists in SQLite)
+  const existingCols = db.prepare("PRAGMA table_info(signal_history)").all().map(c => c.name);
+  const newCols = [
+    ["vwap_position", "TEXT"], ["vwap_slope_dir", "TEXT"], ["rsi_zone", "TEXT"],
+    ["macd_state", "TEXT"], ["heiken_color", "TEXT"], ["heiken_count", "INTEGER"],
+    ["ob_zone", "TEXT"], ["vol_regime", "TEXT"], ["atr_pct", "REAL"],
+    ["bb_width", "REAL"], ["time_decay", "REAL"], ["degenerate", "INTEGER DEFAULT 0"]
+  ];
+  for (const [col, type] of newCols) {
+    if (!existingCols.includes(col)) {
+      db.exec(`ALTER TABLE signal_history ADD COLUMN ${col} ${type}`);
+    }
+  }
+
   stmts = {
     insert: db.prepare(`
       INSERT INTO signal_history (
         market_id, question, category, signal, side, strength, phase, regime,
         model_up, model_down, market_yes, market_no, edge, rsi,
-        orderbook_imbalance, settlement_left_min, liquidity
+        orderbook_imbalance, settlement_left_min, liquidity,
+        vwap_position, vwap_slope_dir, rsi_zone, macd_state,
+        heiken_color, heiken_count, ob_zone, vol_regime, atr_pct,
+        bb_width, time_decay, degenerate
       ) VALUES (
         @market_id, @question, @category, @signal, @side, @strength, @phase, @regime,
         @model_up, @model_down, @market_yes, @market_no, @edge, @rsi,
-        @orderbook_imbalance, @settlement_left_min, @liquidity
+        @orderbook_imbalance, @settlement_left_min, @liquidity,
+        @vwap_position, @vwap_slope_dir, @rsi_zone, @macd_state,
+        @heiken_color, @heiken_count, @ob_zone, @vol_regime, @atr_pct,
+        @bb_width, @time_decay, @degenerate
       )
     `),
 
@@ -123,21 +156,90 @@ function ensureTable() {
 }
 
 /**
+ * Classify indicator states into categorical zones for learning.
+ */
+function classifyIndicators(tick) {
+  const ind = tick.indicators || {};
+  const price = tick.prices?.last;
+  const vwap = ind.vwap;
+
+  // VWAP position: ABOVE / BELOW / AT
+  let vwap_position = null;
+  if (price != null && vwap != null) {
+    const dist = (price - vwap) / vwap;
+    vwap_position = dist > 0.001 ? "ABOVE" : dist < -0.001 ? "BELOW" : "AT";
+  }
+
+  // VWAP slope direction
+  let vwap_slope_dir = null;
+  if (ind.vwapSlope != null) {
+    vwap_slope_dir = ind.vwapSlope > 0 ? "UP" : ind.vwapSlope < 0 ? "DOWN" : "FLAT";
+  }
+
+  // RSI zone
+  let rsi_zone = null;
+  if (ind.rsi != null) {
+    if (ind.rsi >= 70) rsi_zone = "OVERBOUGHT";
+    else if (ind.rsi >= 55) rsi_zone = "BULLISH";
+    else if (ind.rsi > 45) rsi_zone = "NEUTRAL";
+    else if (ind.rsi > 30) rsi_zone = "BEARISH";
+    else rsi_zone = "OVERSOLD";
+  }
+
+  // MACD state
+  let macd_state = null;
+  const macd = ind.macd;
+  if (macd != null && macd.hist != null) {
+    if (macd.hist > 0 && (macd.histDelta ?? 0) > 0) macd_state = "EXPANDING_GREEN";
+    else if (macd.hist > 0) macd_state = "FADING_GREEN";
+    else if (macd.hist < 0 && (macd.histDelta ?? 0) < 0) macd_state = "EXPANDING_RED";
+    else if (macd.hist < 0) macd_state = "FADING_RED";
+    else macd_state = "ZERO";
+  }
+
+  // Orderbook imbalance zone
+  let ob_zone = null;
+  const obi = tick.orderbookImbalance;
+  if (obi != null) {
+    if (obi > 1.5) ob_zone = "STRONG_BID";
+    else if (obi > 1.2) ob_zone = "BID";
+    else if (obi < 0.67) ob_zone = "STRONG_ASK";
+    else if (obi < 0.83) ob_zone = "ASK";
+    else ob_zone = "BALANCED";
+  }
+
+  return {
+    vwap_position,
+    vwap_slope_dir,
+    rsi_zone,
+    macd_state,
+    heiken_color: ind.heiken?.color || null,
+    heiken_count: ind.heiken?.count ?? null,
+    ob_zone,
+    vol_regime: tick.volRegime || null,
+    atr_pct: tick.atrPct ?? null,
+    bb_width: tick.bbWidth ?? null,
+    time_decay: tick.timeAware?.timeDecay ?? null,
+    degenerate: tick.scored?.degenerate ? 1 : 0
+  };
+}
+
+/**
  * Log a signal from a tick.
  */
 export function logSignal(tick) {
   if (!stmts) ensureTable();
 
-  const isEnter = tick.rec?.action === "ENTER";
   const side = tick.rec?.side || null;
   const bestEdge = side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
+  const features = classifyIndicators(tick);
 
   return stmts.insert.run({
     market_id: tick.marketId || "unknown",
     question: tick.question || null,
     category: tick.category || null,
     signal: tick.signal || "NO TRADE",
-    side: side,
+    side,
     strength: tick.rec?.strength || null,
     phase: tick.rec?.phase || null,
     regime: tick.regimeInfo?.regime || null,
@@ -149,7 +251,8 @@ export function logSignal(tick) {
     rsi: tick.indicators?.rsi ?? null,
     orderbook_imbalance: tick.orderbookImbalance ?? null,
     settlement_left_min: tick.settlementLeftMin ?? null,
-    liquidity: tick.market?.liquidity ?? null
+    liquidity: tick.market?.liquidity ?? null,
+    ...features
   });
 }
 
@@ -205,6 +308,121 @@ export function getSignalStats() {
     byCategory,
     byStrength
   };
+}
+
+/**
+ * Get win rates per indicator feature value.
+ * Returns a map: { featureName: { featureValue: { wins, losses, total, winRate } } }
+ * Only includes features with at least minSamples settled outcomes.
+ */
+export function getFeatureWinRates(minSamples = 10) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  const features = [
+    "vwap_position", "vwap_slope_dir", "rsi_zone", "macd_state",
+    "heiken_color", "ob_zone", "vol_regime", "regime"
+  ];
+
+  const result = {};
+  for (const feat of features) {
+    const rows = db.prepare(`
+      SELECT
+        ${feat} as val,
+        COUNT(*) as total,
+        SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses
+      FROM signal_history
+      WHERE signal != 'NO TRADE'
+        AND outcome IS NOT NULL
+        AND ${feat} IS NOT NULL
+      GROUP BY ${feat}
+      HAVING total >= ?
+    `).all(minSamples);
+
+    if (rows.length > 0) {
+      result[feat] = {};
+      for (const row of rows) {
+        const settled = row.wins + row.losses;
+        result[feat][row.val] = {
+          wins: row.wins,
+          losses: row.losses,
+          total: row.total,
+          winRate: settled > 0 ? row.wins / settled : null
+        };
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Compute dynamic indicator weights from outcome history.
+ *
+ * For each indicator feature, measure how well each value predicts wins.
+ * Weight = (win_rate - 0.5) * 2 * confidence_factor
+ * where confidence_factor = min(1, samples / 50)
+ *
+ * Returns: { featureName: { featureValue: weight } }
+ * Positive weight = bullish signal, negative = bearish.
+ *
+ * Falls back to null if insufficient data (<50 total settled outcomes).
+ */
+export function computeDynamicWeights() {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  // Check if we have enough settled outcomes
+  const { settled } = db.prepare(`
+    SELECT COUNT(*) as settled FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+  `).get();
+
+  if (settled < 50) return null; // Not enough data
+
+  const featureRates = getFeatureWinRates(5);
+  const weights = {};
+
+  for (const [feat, values] of Object.entries(featureRates)) {
+    weights[feat] = {};
+    for (const [val, stats] of Object.entries(values)) {
+      if (stats.winRate === null) continue;
+      const confidenceFactor = Math.min(1, stats.total / 50);
+      // Weight ranges from -1 (always loses) to +1 (always wins)
+      // 0 = coin flip (50% win rate)
+      weights[feat][val] = (stats.winRate - 0.5) * 2 * confidenceFactor;
+    }
+  }
+
+  return weights;
+}
+
+/**
+ * Get combo win rates: pairs of features that appear together.
+ * Useful for identifying high-confidence setups.
+ */
+export function getComboWinRates(minSamples = 10) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  return db.prepare(`
+    SELECT
+      vwap_position || '+' || rsi_zone as combo,
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as win_rate,
+      AVG(pnl_pct) as avg_pnl
+    FROM signal_history
+    WHERE signal != 'NO TRADE'
+      AND outcome IS NOT NULL
+      AND vwap_position IS NOT NULL
+      AND rsi_zone IS NOT NULL
+    GROUP BY combo
+    HAVING total >= ?
+    ORDER BY win_rate DESC
+  `).all(minSamples);
 }
 
 /**
