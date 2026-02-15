@@ -25,7 +25,11 @@ import { CONFIG } from "../config.js";
  *   { id, question, outcomes, clobTokenIds, outcomePrices, category, liquidity, endDate, ... }
  */
 export function createMarketPoller(market) {
-  const isCrypto = market.category === "crypto";
+  // Detect crypto-based markets: explicit "crypto" category, or tags containing Crypto/Bitcoin/Ethereum
+  const cryptoCategories = new Set(["crypto", "Bitcoin", "Ethereum"]);
+  const cryptoTags = new Set(["Crypto", "Bitcoin", "Ethereum", "Crypto Prices"]);
+  const isCrypto = cryptoCategories.has(market.category)
+    || (Array.isArray(market.tags) && market.tags.some((t) => cryptoTags.has(t)));
   const yesTokenId = market.clobTokenIds[0] || null;
   const noTokenId = market.clobTokenIds[1] || null;
 
@@ -146,10 +150,17 @@ export function createMarketPoller(market) {
       ? obUp.bidLiquidity / obUp.askLiquidity
       : null;
 
+    // Indicator horizon: how far out current indicators are useful (minutes)
+    // This is the "sweet spot" where indicators are most predictive.
+    // Beyond this, sqrt decay reduces confidence gradually.
+    const indicatorHorizon = isCrypto
+      ? (market.category === "Up or Down" || market.category === "15M" ? 15 : 60)
+      : 240; // CLOB hourly candles: trends persist for ~4 hours
+
     // Engines
     const regimeInfo = detectRegime({ price: lastPrice, vwap: vwapNow, vwapSlope, vwapCrossCount, volumeRecent, volumeAvg });
     const scored = scoreDirection({ price: lastPrice, vwap: vwapNow, vwapSlope, rsi: rsiNow, rsiSlope, macd, heikenColor: consec.color, heikenCount: consec.count, failedVwapReclaim, orderbookImbalance });
-    const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, CONFIG.candleWindowMinutes);
+    const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, indicatorHorizon);
 
     const marketUp = snapshot.ok ? snapshot.prices.up : null;
     const marketDown = snapshot.ok ? snapshot.prices.down : null;

@@ -30,8 +30,9 @@ const CATEGORY_PROFILES = {
   crypto:    { edgeMult: 0.8,  probMult: 0.95 },
   Bitcoin:   { edgeMult: 0.8,  probMult: 0.95 },
   Ethereum:  { edgeMult: 0.8,  probMult: 0.95 },
-  "Up or Down": { edgeMult: 0.85, probMult: 0.95 },
-  "15M":     { edgeMult: 0.85, probMult: 0.95 },
+  "Up or Down": { edgeMult: 1.8, probMult: 1.15 },  // 50/50 coin-flip markets — require strong conviction
+  "15M":        { edgeMult: 1.8, probMult: 1.15 },
+  "Hide From New": { edgeMult: 1.8, probMult: 1.15 },
   Sports:    { edgeMult: 1.2,  probMult: 1.1  },
   Esports:   { edgeMult: 1.1,  probMult: 1.05 },
   Tennis:    { edgeMult: 1.2,  probMult: 1.1  },
