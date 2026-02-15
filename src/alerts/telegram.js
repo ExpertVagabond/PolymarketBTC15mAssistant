@@ -1,5 +1,5 @@
 /**
- * Telegram Bot API alert sender.
+ * @deprecated Legacy Telegram alert sender. See notifications/dispatch.js for the primary alert system.
  * Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
  */
 

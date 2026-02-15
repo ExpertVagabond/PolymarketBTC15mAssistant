@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolySignal Admin</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0b0b11; color: #c8c8d0; min-height: 100vh; line-height: 1.5; }
+
+    .header { padding: 14px 28px; background: #101018; border-bottom: 1px solid #1e1e2a; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-left h1 { font-size: 17px; color: #fff; font-weight: 700; }
+    .header-left .badge { font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; background: #f8717120; color: #f87171; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-link { color: #6b7280; text-decoration: none; font-size: 12px; font-weight: 500; }
+    .header-link:hover { color: #a5b4fc; }
+    .refresh-badge { font-size: 10px; color: #4b5563; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 20px 28px; }
+    .card { background: #12121a; border: 1px solid #1e1e2a; border-radius: 10px; padding: 16px 18px; }
+    .card.wide { grid-column: 1 / -1; }
+    .card.half { grid-column: span 2; }
+    .card-title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px; }
+    .kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #141420; font-size: 12px; }
+    .kv:last-child { border-bottom: none; }
+    .kv .k { color: #6b7280; }
+    .kv .v { color: #e5e7eb; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .kv .v.green { color: #34d399; }
+    .kv .v.red { color: #f87171; }
+    .kv .v.amber { color: #fbbf24; }
+    .kv .v.blue { color: #60a5fa; }
+
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .status-dot.ok { background: #34d399; }
+    .status-dot.warn { background: #fbbf24; }
+    .status-dot.err { background: #f87171; }
+
+    .source-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #141420; font-size: 12px; }
+    .source-row:last-child { border-bottom: none; }
+    .source-name { color: #e5e7eb; font-weight: 500; width: 120px; }
+    .source-stats { color: #6b7280; flex: 1; font-variant-numeric: tabular-nums; }
+
+    .auth-wall { text-align: center; padding: 80px 28px; }
+    .auth-wall h2 { color: #fff; margin-bottom: 8px; }
+    .auth-wall p { color: #6b7280; font-size: 13px; }
+
+    .footer { text-align: center; padding: 28px; color: #27272f; font-size: 11px; }
+    .footer a { color: #4b5563; }
+
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } .card.wide, .card.half { grid-column: 1; } }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>PolySignal</h1>
+    <span class="badge">ADMIN</span>
+  </div>
+  <div class="header-right">
+    <span class="refresh-badge" id="lastRefresh">Loading...</span>
+    <a href="/" class="header-link">Dashboard</a>
+    <a href="/stats.html" class="header-link">Performance</a>
+  </div>
+</div>
+
+<div id="authWall" class="auth-wall" style="display:none">
+  <h2>Admin Access Required</h2>
+  <p>Login via the main dashboard Settings tab to access this page.</p>
+</div>
+
+<div id="adminContent">
+  <div class="grid">
+    <!-- System Health -->
+    <div class="card">
+      <div class="card-title">System Health</div>
+      <div id="healthBlock">
+        <div class="kv"><span class="k">Status</span><span class="v" id="sysStatus">-</span></div>
+        <div class="kv"><span class="k">Uptime</span><span class="v" id="sysUptime">-</span></div>
+        <div class="kv"><span class="k">Memory (Heap)</span><span class="v" id="sysMem">-</span></div>
+        <div class="kv"><span class="k">WS Clients</span><span class="v blue" id="sysWs">-</span></div>
+      </div>
+    </div>
+
+    <!-- Scanner Stats -->
+    <div class="card">
+      <div class="card-title">Scanner</div>
+      <div id="scannerBlock">
+        <div class="kv"><span class="k">Tracked Markets</span><span class="v" id="scTracked">-</span></div>
+        <div class="kv"><span class="k">Active Signals</span><span class="v green" id="scSignals">-</span></div>
+        <div class="kv"><span class="k">Categories</span><span class="v" id="scCats">-</span></div>
+      </div>
+    </div>
+
+    <!-- Signal Stats -->
+    <div class="card">
+      <div class="card-title">Signal Performance</div>
+      <div id="signalBlock">
+        <div class="kv"><span class="k">Total Signals</span><span class="v" id="sigTotal">-</span></div>
+        <div class="kv"><span class="k">Win Rate</span><span class="v green" id="sigWinRate">-</span></div>
+        <div class="kv"><span class="k">Wins / Losses</span><span class="v" id="sigRecord">-</span></div>
+        <div class="kv"><span class="k">Pending</span><span class="v amber" id="sigPending">-</span></div>
+        <div class="kv"><span class="k">Avg Edge</span><span class="v" id="sigEdge">-</span></div>
+      </div>
+    </div>
+
+    <!-- Data Sources -->
+    <div class="card half">
+      <div class="card-title">Data Source Health</div>
+      <div id="sourcesBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Subscribers -->
+    <div class="card">
+      <div class="card-title">Subscribers</div>
+      <div id="subBlock">
+        <div class="kv"><span class="k">Total</span><span class="v" id="subTotal">-</span></div>
+        <div class="kv"><span class="k">Active</span><span class="v green" id="subActive">-</span></div>
+        <div class="kv"><span class="k">Pro</span><span class="v blue" id="subPro">-</span></div>
+        <div class="kv"><span class="k">Basic</span><span class="v" id="subBasic">-</span></div>
+        <div class="kv"><span class="k">Free</span><span class="v" id="subFree">-</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">PolySignal Admin &mdash; <a href="/">Back to Dashboard</a></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadAdmin() {
+  try {
+    // Check auth
+    const me = await fetch("/api/auth/me").then(r => r.json());
+    if (!me.email) { showAuthWall(); return; }
+
+    // Load all data in parallel
+    const [health, admin] = await Promise.all([
+      fetch("/health/detailed").then(r => r.json()),
+      fetch("/api/admin/stats").then(r => r.json()).catch(() => null)
+    ]);
+
+    renderHealth(health);
+    if (admin) renderAdmin(admin);
+
+    $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch {
+    showAuthWall();
+  }
+}
+
+function showAuthWall() {
+  $("authWall").style.display = "block";
+  $("adminContent").style.display = "none";
+}
+
+function renderHealth(h) {
+  const statusColor = h.status === "healthy" ? "green" : h.status === "degraded" ? "amber" : "red";
+  $("sysStatus").innerHTML = `<span class="status-dot ${statusColor === "green" ? "ok" : statusColor === "amber" ? "warn" : "err"}"></span>${h.status || "unknown"}`;
+  $("sysUptime").textContent = formatUptime(h.uptime);
+  $("sysMem").textContent = h.memory?.heap || "-";
+  $("sysWs").textContent = h.wsClients ?? 0;
+
+  // Scanner
+  if (h.scanner) {
+    $("scTracked").textContent = h.scanner.tracked ?? 0;
+    $("scSignals").textContent = h.scanner.withSignal ?? 0;
+    $("scCats").textContent = h.scanner.categories ?? 0;
+  }
+
+  // Data sources
+  const sources = h.sources;
+  if (sources && typeof sources === "object") {
+    const el = $("sourcesBlock");
+    el.innerHTML = Object.entries(sources).map(([name, s]) => {
+      const up = s.status === "healthy" || s.uptime > 0.9;
+      const dotClass = up ? "ok" : s.status === "degraded" ? "warn" : "err";
+      const latency = s.avgLatencyMs != null ? Math.round(s.avgLatencyMs) + "ms" : "-";
+      const upPct = s.uptime != null ? (s.uptime * 100).toFixed(1) + "%" : "-";
+      return `<div class="source-row">
+        <span class="status-dot ${dotClass}"></span>
+        <span class="source-name">${esc(name)}</span>
+        <span class="source-stats">latency: ${latency} | uptime: ${upPct} | errors: ${s.errors ?? 0}</span>
+      </div>`;
+    }).join("");
+  }
+}
+
+function renderAdmin(a) {
+  // Signal stats
+  const sig = a.signals || {};
+  $("sigTotal").textContent = sig.total_signals ?? 0;
+  $("sigWinRate").textContent = sig.winRate ? sig.winRate + "%" : "-";
+  $("sigRecord").textContent = `${sig.wins ?? 0}W / ${sig.losses ?? 0}L`;
+  $("sigPending").textContent = sig.pending ?? 0;
+  $("sigEdge").textContent = sig.avg_edge != null ? "+" + (sig.avg_edge * 100).toFixed(1) + "%" : "-";
+
+  // Subscribers
+  const sub = a.subscribers || {};
+  $("subTotal").textContent = sub.total ?? 0;
+  $("subActive").textContent = sub.active ?? 0;
+  $("subPro").textContent = sub.pro ?? 0;
+  $("subBasic").textContent = sub.basic ?? 0;
+  $("subFree").textContent = (sub.total ?? 0) - (sub.pro ?? 0) - (sub.basic ?? 0);
+}
+
+function formatUptime(secs) {
+  if (!secs) return "-";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }
+
+loadAdmin();
+setInterval(loadAdmin, 30_000);
+</script>
+</body>
+</html>

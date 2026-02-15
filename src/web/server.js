@@ -21,7 +21,7 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard, getSignalById } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
@@ -259,6 +259,68 @@ export async function startWebServer(opts = {}) {
 
   app.get("/api/leaderboard", async () => {
     return getLeaderboard();
+  });
+
+  /* ── Signal Detail + Share ── */
+
+  app.get("/api/signal/:id", async (req) => {
+    const signal = getSignalById(Number(req.params.id));
+    return signal || { error: "not_found" };
+  });
+
+  app.get("/s/:id", async (req, reply) => {
+    const signal = getSignalById(Number(req.params.id));
+    if (!signal) return reply.code(404).send("Signal not found");
+
+    const side = signal.side === "UP" ? "YES" : "NO";
+    const edge = signal.edge != null ? "+" + (signal.edge * 100).toFixed(1) + "%" : "";
+    const conf = signal.confidence != null ? signal.confidence : "";
+    const outcome = signal.outcome || "OPEN";
+    const title = `BUY ${side} — ${(signal.question || "").slice(0, 60)}`;
+    const desc = `Edge: ${edge} | Confidence: ${conf} | ${outcome} | ${signal.category || ""}`;
+
+    reply.header("Content-Type", "text/html");
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${esc(title)} | PolySignal</title>
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(desc)}">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,system-ui,sans-serif;background:#0b0b11;color:#c8c8d0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+.card{background:#12121a;border:1px solid #1e1e2a;border-radius:12px;padding:24px;max-width:500px;width:100%}
+h2{font-size:16px;color:#fff;margin-bottom:12px}
+.side{font-size:20px;font-weight:800;margin-bottom:6px;color:${signal.side === "UP" ? "#34d399" : "#f87171"}}
+.question{font-size:14px;color:#d1d5db;margin-bottom:16px;line-height:1.4}
+.metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.metric{text-align:center}.metric-label{font-size:10px;text-transform:uppercase;color:#4b5563;margin-bottom:2px}.metric-val{font-size:18px;font-weight:700}
+.green{color:#34d399}.red{color:#f87171}.amber{color:#fbbf24}
+.outcome{text-align:center;font-size:14px;font-weight:700;padding:8px;border-radius:6px;margin-bottom:16px}
+.outcome.WIN{background:#34d39920;color:#34d399}.outcome.LOSS{background:#f8717120;color:#f87171}.outcome.OPEN{background:#fbbf2420;color:#fbbf24}
+.back{display:inline-block;margin-top:20px;color:#6b7280;font-size:12px;text-decoration:none}.back:hover{color:#a5b4fc}
+.brand{font-size:11px;color:#27272f;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="side">BUY ${esc(side)}</div>
+<div class="question">${esc(signal.question || "Unknown market")}</div>
+<div class="metrics">
+<div class="metric"><div class="metric-label">Edge</div><div class="metric-val green">${edge || "-"}</div></div>
+<div class="metric"><div class="metric-label">Confidence</div><div class="metric-val">${conf || "-"}</div></div>
+<div class="metric"><div class="metric-label">Strength</div><div class="metric-val amber">${esc(signal.strength || "-")}</div></div>
+</div>
+<div class="outcome ${esc(outcome)}">${esc(outcome)}${signal.pnl_pct != null ? " | P&L: " + (signal.pnl_pct >= 0 ? "+" : "") + (signal.pnl_pct * 100).toFixed(1) + "%" : ""}</div>
+<div style="font-size:11px;color:#4b5563;text-align:center">${esc(signal.category || "other")} | ${signal.created_at || ""}</div>
+</div>
+<a href="/" class="back">Open PolySignal Dashboard</a>
+<div class="brand">PolySignal — AI-powered Polymarket signal scanner</div>
+</body></html>`;
   });
 
   /* ── Portfolio API ── */
@@ -533,6 +595,11 @@ export async function startWebServer(opts = {}) {
   console.log(`WebSocket:     ws://localhost:${PORT}/ws`);
 
   return app;
+}
+
+function esc(s) {
+  if (!s) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function parseCookie(cookieHeader, name) {

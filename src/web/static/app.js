@@ -1377,6 +1377,7 @@ function renderFeed() {
         </div>
       </div>
       ${outcomeHtml}
+      ${s.id ? `<button class="share-btn" onclick="shareSignal(${s.id})" title="Copy link">&#x1f517;</button>` : ""}
     </div>`;
   }).join("");
 
@@ -1387,8 +1388,18 @@ function renderFeed() {
   $("feedList").innerHTML = html + moreBtn;
 }
 
+function shareSignal(id) {
+  const url = `${location.origin}/s/${id}`;
+  navigator.clipboard.writeText(url).then(() => {
+    if (typeof showToast === "function") showToast("Link copied to clipboard!", "success");
+  }).catch(() => {
+    prompt("Copy this link:", url);
+  });
+}
+
 window.setFeedFilter = setFeedFilter;
 window.loadFeed = loadFeed;
+window.shareSignal = shareSignal;
 
 /* ═══ Market Detail Modal ═══ */
 

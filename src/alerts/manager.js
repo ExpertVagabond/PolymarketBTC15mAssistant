@@ -1,5 +1,9 @@
 /**
- * Alert manager: checks state, fires alerts when thresholds met.
+ * @deprecated Use src/notifications/dispatch.js for webhook + email alerts.
+ * This legacy module sends Telegram/Discord direct alerts only.
+ * It is still called by bot.js and index-full.js but should not be
+ * extended. New alert channels belong in notifications/dispatch.js.
+ *
  * Env: ENABLE_ALERTS=false, ALERT_TA_THRESHOLD=0.7
  */
 

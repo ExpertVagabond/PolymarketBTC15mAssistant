@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolySignal API Docs</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0b0b11; color: #c8c8d0; min-height: 100vh; line-height: 1.5; }
+
+    .header { padding: 14px 28px; background: #101018; border-bottom: 1px solid #1e1e2a; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-left h1 { font-size: 17px; color: #fff; font-weight: 700; }
+    .header-left .badge { font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; background: #3b82f620; color: #60a5fa; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-link { color: #6b7280; text-decoration: none; font-size: 12px; font-weight: 500; }
+    .header-link:hover { color: #a5b4fc; }
+
+    .hero { text-align: center; padding: 40px 28px 20px; }
+    .hero h2 { font-size: 22px; color: #fff; font-weight: 700; margin-bottom: 6px; }
+    .hero p { font-size: 13px; color: #6b7280; max-width: 550px; margin: 0 auto; }
+
+    .docs-wrap { max-width: 800px; margin: 0 auto; padding: 0 28px 40px; }
+
+    .info-box { background: #12121a; border: 1px solid #1e1e2a; border-radius: 10px; padding: 16px 18px; margin-bottom: 20px; font-size: 12px; color: #9ca3af; line-height: 1.7; }
+    .info-box code { background: #1a1a24; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #a5b4fc; font-size: 11px; }
+
+    .section-title { font-size: 14px; font-weight: 700; color: #e5e7eb; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #1e1e2a; }
+
+    .endpoint { background: #12121a; border: 1px solid #1e1e2a; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
+    .ep-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .ep-method { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }
+    .ep-method.get { background: #34d39920; color: #34d399; }
+    .ep-method.post { background: #3b82f620; color: #60a5fa; }
+    .ep-method.delete { background: #f8717120; color: #f87171; }
+    .ep-path { font-family: monospace; font-size: 13px; color: #e5e7eb; font-weight: 500; }
+    .ep-desc { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+    .ep-actions { display: flex; gap: 6px; }
+    .try-btn { background: #1a1a24; border: 1px solid #2a2a36; border-radius: 6px; padding: 4px 12px; font-size: 10px; color: #93c5fd; cursor: pointer; font-family: inherit; font-weight: 600; transition: all 0.15s; }
+    .try-btn:hover { border-color: #3b82f6; background: #3b82f618; }
+    .ep-response { margin-top: 8px; background: #0e0e16; border: 1px solid #141420; border-radius: 6px; padding: 10px 14px; font-family: monospace; font-size: 11px; color: #9ca3af; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-all; display: none; }
+
+    .footer { text-align: center; padding: 28px; color: #27272f; font-size: 11px; }
+    .footer a { color: #4b5563; }
+
+    @media (max-width: 768px) { .docs-wrap { padding: 0 16px 28px; } }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>PolySignal</h1>
+    <span class="badge">API DOCS</span>
+  </div>
+  <div class="header-right">
+    <a href="/" class="header-link">Dashboard</a>
+    <a href="/stats.html" class="header-link">Performance</a>
+    <a href="/leaderboard.html" class="header-link">Leaderboard</a>
+  </div>
+</div>
+
+<div class="hero">
+  <h2>API Reference</h2>
+  <p>Integrate PolySignal signals into your tools, bots, and dashboards. All public endpoints require no authentication.</p>
+</div>
+
+<div class="docs-wrap">
+
+  <div class="info-box">
+    <strong>Base URL:</strong> <code>http://localhost:3000</code><br>
+    <strong>Rate Limit:</strong> 100 requests/minute per IP<br>
+    <strong>Auth:</strong> Public endpoints need no auth. Authenticated endpoints accept session cookies or <code>X-API-Key</code> header.<br>
+    <strong>API Key Format:</strong> <code>pk_live_&lt;32 hex chars&gt;</code> — generate via Settings tab or <code>POST /api/keys/generate</code>
+  </div>
+
+  <div class="section-title">Health & Status</div>
+  <div id="healthEndpoints"></div>
+
+  <div class="section-title">Scanner</div>
+  <div id="scannerEndpoints"></div>
+
+  <div class="section-title">Signals</div>
+  <div id="signalEndpoints"></div>
+
+  <div class="section-title">Analytics</div>
+  <div id="analyticsEndpoints"></div>
+
+  <div class="section-title">Portfolio</div>
+  <div id="portfolioEndpoints"></div>
+
+  <div class="section-title">Learning / ML</div>
+  <div id="learningEndpoints"></div>
+
+  <div class="section-title">Leaderboard</div>
+  <div id="leaderboardEndpoints"></div>
+
+  <div class="section-title">Strategy Simulator</div>
+  <div id="simulatorEndpoints"></div>
+
+  <div class="section-title">Authenticated — Auth</div>
+  <div id="authEndpoints"></div>
+
+  <div class="section-title">Authenticated — API Keys</div>
+  <div id="keyEndpoints"></div>
+
+  <div class="section-title">Authenticated — Webhooks</div>
+  <div id="webhookEndpoints"></div>
+
+  <div class="section-title">Authenticated — Email Alerts</div>
+  <div id="emailEndpoints"></div>
+
+  <div class="section-title">Programmatic API (API Key Required)</div>
+  <div id="v1Endpoints"></div>
+
+</div>
+
+<div class="footer">PolySignal &mdash; <a href="/">Back to Dashboard</a></div>
+
+<script>
+const ENDPOINTS = {
+  healthEndpoints: [
+    { method: "GET", path: "/health", desc: "Simple uptime check", tryable: true },
+    { method: "GET", path: "/health/detailed", desc: "Per-source health, scanner stats, memory usage", tryable: true }
+  ],
+  scannerEndpoints: [
+    { method: "GET", path: "/api/scanner/state", desc: "All tracked markets with current prices and signals", tryable: true },
+    { method: "GET", path: "/api/scanner/signals", desc: "Active trading signals only", tryable: true },
+    { method: "GET", path: "/api/scanner/stats", desc: "Scanner statistics (tracked, categories, signal count)", tryable: true }
+  ],
+  signalEndpoints: [
+    { method: "GET", path: "/api/signals/recent?limit=10", desc: "Recent signal history (default 50, max 200)", tryable: true },
+    { method: "GET", path: "/api/signals/stats", desc: "Overall win rate, P&L, category/strength breakdown", tryable: true },
+    { method: "GET", path: "/api/public-stats?days=30", desc: "Full performance dashboard data for public stats page", tryable: true },
+    { method: "GET", path: "/api/signal/:id", desc: "Single signal detail by ID" }
+  ],
+  analyticsEndpoints: [
+    { method: "GET", path: "/api/analytics/timeseries?days=7", desc: "Daily bucketed stats (wins, losses, win rate, P&L)", tryable: true },
+    { method: "GET", path: "/api/analytics/calibration", desc: "Confidence score calibration vs actual outcomes", tryable: true },
+    { method: "GET", path: "/api/analytics/drawdown", desc: "Max drawdown, consecutive streaks, equity curve", tryable: true },
+    { method: "GET", path: "/api/analytics/performance?days=7", desc: "Sharpe ratio, best/worst trade, avg P&L", tryable: true },
+    { method: "GET", path: "/api/analytics/market/:marketId", desc: "Per-market performance stats" },
+    { method: "GET", path: "/api/analytics/export?format=csv&days=30", desc: "Export signals as CSV or JSON (Pro)", tryable: true }
+  ],
+  portfolioEndpoints: [
+    { method: "GET", path: "/api/portfolio/positions", desc: "Open virtual positions", tryable: true },
+    { method: "GET", path: "/api/portfolio/summary", desc: "Portfolio KPIs (exposure, P&L, win rate)", tryable: true },
+    { method: "GET", path: "/api/portfolio/recent?limit=20", desc: "Recent closed trades", tryable: true }
+  ],
+  learningEndpoints: [
+    { method: "GET", path: "/api/learning/weights", desc: "Current model weights + combo multipliers", tryable: true },
+    { method: "GET", path: "/api/learning/features", desc: "Per-feature win rates", tryable: true },
+    { method: "GET", path: "/api/learning/combos", desc: "VWAP+RSI combo pair win rates", tryable: true },
+    { method: "GET", path: "/api/learning/status", desc: "Learning system status", tryable: true }
+  ],
+  leaderboardEndpoints: [
+    { method: "GET", path: "/api/leaderboard", desc: "Category rankings, top-edge wins, streaks, top markets", tryable: true }
+  ],
+  simulatorEndpoints: [
+    { method: "GET", path: "/api/simulate?minConfidence=60", desc: "Backtest strategy with filters (confidence, edge, category, strength, side)", tryable: true }
+  ],
+  authEndpoints: [
+    { method: "POST", path: "/api/auth/login", desc: "Send magic link email. Body: { email }" },
+    { method: "GET", path: "/auth/verify?token=...", desc: "Verify magic link token, set session cookie" },
+    { method: "GET", path: "/api/auth/me", desc: "Current user info (email, plan)" },
+    { method: "POST", path: "/api/auth/logout", desc: "Clear session cookie" },
+    { method: "GET", path: "/api/plan", desc: "Current user plan (free if not logged in)", tryable: true }
+  ],
+  keyEndpoints: [
+    { method: "POST", path: "/api/keys/generate", desc: "Create API key. Body: { name }. Returns raw key (shown once)" },
+    { method: "GET", path: "/api/keys", desc: "List your API keys (masked)" },
+    { method: "DELETE", path: "/api/keys/:id", desc: "Revoke an API key" }
+  ],
+  webhookEndpoints: [
+    { method: "POST", path: "/api/webhooks", desc: "Register webhook. Body: { url, name }. URL must be HTTPS" },
+    { method: "GET", path: "/api/webhooks", desc: "List your webhooks with success/fail counts" },
+    { method: "DELETE", path: "/api/webhooks/:id", desc: "Delete a webhook" }
+  ],
+  emailEndpoints: [
+    { method: "GET", path: "/api/email-prefs", desc: "Get email alert preferences" },
+    { method: "POST", path: "/api/email-prefs", desc: "Update prefs. Body: { alertsEnabled, minConfidence, categories }" }
+  ],
+  v1Endpoints: [
+    { method: "GET", path: "/api/v1/signals", desc: "Recent signals (requires X-API-Key header)" },
+    { method: "GET", path: "/api/v1/stats", desc: "Signal statistics (requires X-API-Key header)" },
+    { method: "GET", path: "/api/v1/scanner", desc: "Active signals + scanner stats (requires X-API-Key header)" }
+  ]
+};
+
+function renderEndpoints() {
+  for (const [sectionId, eps] of Object.entries(ENDPOINTS)) {
+    const el = document.getElementById(sectionId);
+    if (!el) continue;
+    el.innerHTML = eps.map((ep, i) => {
+      const mc = ep.method.toLowerCase();
+      const tryBtn = ep.tryable ? `<div class="ep-actions"><button class="try-btn" onclick="tryEndpoint('${sectionId}_${i}','${ep.path}')">Try it</button></div>` : "";
+      return `<div class="endpoint">
+        <div class="ep-header">
+          <span class="ep-method ${mc}">${ep.method}</span>
+          <span class="ep-path">${esc(ep.path)}</span>
+        </div>
+        <div class="ep-desc">${esc(ep.desc)}</div>
+        ${tryBtn}
+        <pre class="ep-response" id="resp_${sectionId}_${i}"></pre>
+      </div>`;
+    }).join("");
+  }
+}
+
+async function tryEndpoint(id, path) {
+  const el = document.getElementById("resp_" + id);
+  if (!el) return;
+  el.style.display = "block";
+  el.textContent = "Loading...";
+  try {
+    const res = await fetch(path);
+    const data = await res.json();
+    el.textContent = JSON.stringify(data, null, 2);
+  } catch (err) {
+    el.textContent = "Error: " + err.message;
+  }
+}
+
+function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }
+
+renderEndpoints();
+</script>
+</body>
+</html>

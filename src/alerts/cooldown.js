@@ -1,5 +1,5 @@
 /**
- * Per-market cooldown to avoid alert spam.
+ * @deprecated Legacy cooldown for Telegram/Discord alerts. See notifications/dispatch.js.
  * Default: 15 minutes (one full window).
  */
 

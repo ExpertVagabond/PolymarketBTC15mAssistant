@@ -1,5 +1,5 @@
 /**
- * Discord webhook alert sender.
+ * @deprecated Legacy Discord alert sender. See notifications/dispatch.js for the primary alert system.
  * Env: DISCORD_WEBHOOK_URL
  */
 

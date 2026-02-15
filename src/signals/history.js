@@ -799,6 +799,15 @@ export function simulateStrategy(filters = {}) {
 }
 
 /**
+ * Get a single signal by ID.
+ */
+export function getSignalById(id) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  return db.prepare("SELECT * FROM signal_history WHERE id = ?").get(id);
+}
+
+/**
  * Leaderboard data: category rankings, top-edge wins, best streaks, top markets.
  */
 export function getLeaderboard() {
