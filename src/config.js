@@ -31,5 +31,14 @@ export const CONFIG = {
     polygonWssUrls: (process.env.POLYGON_WSS_URLS || "").split(",").map((s) => s.trim()).filter(Boolean),
     polygonWssUrl: process.env.POLYGON_WSS_URL || "",
     btcUsdAggregator: process.env.CHAINLINK_BTC_USD_AGGREGATOR || "0xc907E116054Ad103354f2D350FD2514433D57F6f"
+  },
+
+  scanner: {
+    pollIntervalMs: Number(process.env.SCANNER_POLL_INTERVAL_MS) || 30_000,
+    maxMarkets: Number(process.env.SCANNER_MAX_MARKETS) || 50,
+    minLiquidity: Number(process.env.SCANNER_MIN_LIQUIDITY) || 100,
+    categories: process.env.SCANNER_CATEGORIES
+      ? process.env.SCANNER_CATEGORIES.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : null
   }
 };

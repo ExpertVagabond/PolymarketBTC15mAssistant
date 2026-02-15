@@ -10,6 +10,7 @@
     "start:multi": "node src/index-multi.js",
     "start:trading": "node src/index-trading.js",
     "start:full": "node src/index-full.js",
+    "start:server": "node src/server.js",
     "backtest": "node src/backtest/analyzer.js",
     "mcp": "node src/mcp/server.js"
   },
@@ -17,10 +18,16 @@
     "@fastify/static": "^9.0.0",
     "@fastify/websocket": "^11.2.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "better-sqlite3": "^12.6.2",
+    "discord.js": "^14.25.1",
     "ethers": "^6.11.1",
     "fastify": "^5.7.4",
     "https-proxy-agent": "^7.0.6",
+    "jsonwebtoken": "^9.0.3",
+    "node-telegram-bot-api": "^0.67.0",
+    "resend": "^6.9.2",
     "socks-proxy-agent": "^8.0.5",
+    "stripe": "^20.3.1",
     "undici": "^6.21.3",
     "ws": "^8.18.0"
   }
