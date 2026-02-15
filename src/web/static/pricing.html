@@ -68,6 +68,7 @@
       <li class="no">API access</li>
     </ul>
     <a class="btn btn-free" href="/">View Dashboard</a>
+    <a class="btn btn-basic" href="#" onclick="event.preventDefault();startFreeTrial()" style="margin-top:8px;background:#22c55e;font-size:0.9em">Start 7-Day Pro Trial</a>
   </div>
 
   <div class="plan featured">
@@ -137,26 +138,61 @@
 </div>
 
 <script>
-// Subscribe buttons will redirect to Stripe Checkout when backend is configured
-document.getElementById('btn-basic')?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const email = prompt('Enter your email to subscribe:');
-  if (!email) return;
-  const res = await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
-  const data = await res.json();
-  if (data.ok) alert('Check your email for a sign-in link! After signing in, you can subscribe.');
-  else alert('Error: ' + (data.error || 'unknown'));
-});
+async function startCheckout(plan) {
+  // First check if logged in
+  try {
+    const me = await fetch('/api/auth/me').then(r => r.json());
+    if (!me.email) {
+      const email = prompt('Enter your email to get started:');
+      if (!email || !email.includes('@')) return;
+      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+      alert('Check your email for a sign-in link! After signing in, come back to subscribe.');
+      return;
+    }
+    // Logged in - create checkout session
+    const res = await fetch('/api/checkout/create', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ plan })
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else if (data.error === 'stripe_not_configured') {
+      alert('Payments are being set up. Try the free trial instead!');
+    } else {
+      alert('Error: ' + (data.message || data.error || 'unknown'));
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
 
-document.getElementById('btn-pro')?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const email = prompt('Enter your email to subscribe:');
-  if (!email) return;
-  const res = await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
-  const data = await res.json();
-  if (data.ok) alert('Check your email for a sign-in link! After signing in, you can subscribe.');
-  else alert('Error: ' + (data.error || 'unknown'));
-});
+async function startFreeTrial() {
+  try {
+    const me = await fetch('/api/auth/me').then(r => r.json());
+    if (!me.email) {
+      const email = prompt('Enter your email to start your free trial:');
+      if (!email || !email.includes('@')) return;
+      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+      alert('Check your email for a sign-in link! After signing in, your 7-day Pro trial will start automatically.');
+      return;
+    }
+    const res = await fetch('/api/trial/start', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      alert(data.message || 'Trial started!');
+      window.location.href = '/';
+    } else {
+      alert(data.message || data.error || 'Could not start trial');
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+document.getElementById('btn-basic')?.addEventListener('click', (e) => { e.preventDefault(); startCheckout('basic'); });
+document.getElementById('btn-pro')?.addEventListener('click', (e) => { e.preventDefault(); startCheckout('pro'); });
 </script>
 
 </body>

@@ -469,6 +469,7 @@
     <button class="tab-btn" id="tabSimulator" onclick="switchTab('simulator')">Simulator</button>
     <button class="tab-btn" id="tabSettings" onclick="switchTab('settings')">Settings</button>
     <span class="plan-badge free" id="planBadge">FREE</span>
+    <span style="font-size:10px;font-weight:700;display:none" id="trialBadge"></span>
     <button class="notify-btn" id="notifyBtn" onclick="toggleNotifications()" title="Toggle alerts">Alerts: Off</button>
     <a href="/stats.html" class="header-link">Performance</a>
     <a href="/leaderboard.html" class="header-link">Leaderboard</a>
@@ -914,6 +915,23 @@
         <span class="settings-val" id="throttleStatus" style="color:#6b7280">-</span>
       </div>
       <div style="margin-top:10px"><button class="settings-btn" onclick="saveEmailPrefs()">Save Preferences</button></div>
+    </div>
+
+    <!-- Free Trial -->
+    <div class="settings-section" id="trialSection">
+      <div class="settings-section-title">Free Trial</div>
+      <div id="trialBlock">
+        <div class="settings-row">
+          <span class="settings-label">7-day Pro trial</span>
+          <button class="settings-btn" id="startTrialBtn" onclick="startTrialFromSettings()">Start Free Trial</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Referrals -->
+    <div class="settings-section">
+      <div class="settings-section-title">Referrals</div>
+      <div id="referralBlock"><div style="color:#4b5563;font-size:12px">Login to view referral code</div></div>
     </div>
 
     <!-- Delivery Audit -->

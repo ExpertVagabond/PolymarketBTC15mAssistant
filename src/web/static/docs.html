@@ -125,6 +125,18 @@
   <div class="section-title">Walk-Forward Validation</div>
   <div id="walkForwardEndpoints"></div>
 
+  <div class="section-title">Checkout & Billing</div>
+  <div id="checkoutEndpoints"></div>
+
+  <div class="section-title">Free Trial</div>
+  <div id="trialEndpoints"></div>
+
+  <div class="section-title">Referrals</div>
+  <div id="referralEndpoints"></div>
+
+  <div class="section-title">Admin — User Management</div>
+  <div id="adminUserEndpoints"></div>
+
   <div class="section-title">Observability — Error Logs</div>
   <div id="logsEndpoints"></div>
 
@@ -227,6 +239,23 @@ const ENDPOINTS = {
   walkForwardEndpoints: [
     { method: "GET", path: "/api/simulate/walk-forward?minConfidence=60", desc: "Walk-forward validation: 70/30 train/test split with overfitting detection (Pro)", tryable: true },
     { method: "GET", path: "/api/signals/by-date?date=2026-02-15", desc: "All signals for a specific date (for equity curve drill-down)", tryable: true }
+  ],
+  checkoutEndpoints: [
+    { method: "POST", path: "/api/checkout/create", desc: "Create Stripe Checkout session. Body: { plan: 'basic'|'pro' }" }
+  ],
+  trialEndpoints: [
+    { method: "POST", path: "/api/trial/start", desc: "Start 7-day Pro trial (one per account, auth required)" },
+    { method: "GET", path: "/api/trial/status", desc: "Get trial status: active, daysRemaining, eligible" }
+  ],
+  referralEndpoints: [
+    { method: "GET", path: "/api/referral/code", desc: "Get or create your referral code + stats (auth required)" },
+    { method: "POST", path: "/api/referral/claim", desc: "Claim a referral. Body: { code }. Awards referrer after 3 completions" },
+    { method: "GET", path: "/api/referral/stats", desc: "Referral stats: completed, rewards earned, next reward progress" }
+  ],
+  adminUserEndpoints: [
+    { method: "GET", path: "/api/admin/subscribers?plan=pro", desc: "List all subscribers with optional plan/status filter", tryable: true },
+    { method: "POST", path: "/api/admin/grant-comp", desc: "Grant comp access. Body: { email, plan, days }" },
+    { method: "GET", path: "/api/admin/cache-stats", desc: "Response cache hit rate and entry count", tryable: true }
   ],
   logsEndpoints: [
     { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },

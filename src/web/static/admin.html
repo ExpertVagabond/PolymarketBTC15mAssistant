@@ -139,10 +139,53 @@
       <div id="webhookQueueBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Delivery Health -->
+    <div class="card">
+      <div class="card-title">Delivery Health (7d)</div>
+      <div id="deliveryBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Cache Stats -->
+    <div class="card">
+      <div class="card-title">Response Cache</div>
+      <div id="cacheBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
       <div id="errorBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Subscriber List -->
+    <div class="card wide">
+      <div class="card-title">
+        Subscribers
+        <select id="subFilter" onchange="loadSubscribers()" style="margin-left:8px;background:#0e0e16;border:1px solid #1e1e2a;border-radius:4px;color:#9ca3af;font-size:10px;padding:2px 6px">
+          <option value="">All Plans</option>
+          <option value="free">Free</option>
+          <option value="basic">Basic</option>
+          <option value="pro">Pro</option>
+        </select>
+      </div>
+      <div id="subscriberList"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Grant Comp Access -->
+    <div class="card">
+      <div class="card-title">Grant Comp Access</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input type="email" id="compEmail" placeholder="user@example.com" style="background:#0e0e16;border:1px solid #1e1e2a;border-radius:4px;padding:6px 10px;color:#e5e7eb;font-size:12px;font-family:inherit">
+        <div style="display:flex;gap:6px">
+          <select id="compPlan" style="background:#0e0e16;border:1px solid #1e1e2a;border-radius:4px;padding:4px 8px;color:#9ca3af;font-size:11px;font-family:inherit">
+            <option value="pro">Pro</option>
+            <option value="basic">Basic</option>
+          </select>
+          <input type="number" id="compDays" value="30" min="1" max="365" style="background:#0e0e16;border:1px solid #1e1e2a;border-radius:4px;padding:4px 8px;color:#e5e7eb;font-size:11px;width:60px;font-family:inherit"> days
+          <button class="try-btn" onclick="grantComp()">Grant</button>
+        </div>
+        <div id="compResult" style="font-size:11px;color:#34d399;display:none"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -159,12 +202,14 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
       fetch("/api/learning/drift-status").then(r => r.json()).catch(() => null),
-      fetch("/api/admin/webhook-queue").then(r => r.json()).catch(() => null)
+      fetch("/api/admin/webhook-queue").then(r => r.json()).catch(() => null),
+      fetch("/api/admin/delivery-stats").then(r => r.json()).catch(() => null),
+      fetch("/api/admin/cache-stats").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -172,6 +217,9 @@ async function loadAdmin() {
     if (trends) renderErrors(trends);
     if (drift) renderDrift(drift);
     if (whQueue) renderWebhookQueue(whQueue);
+    if (delivery) renderDeliveryHealth(delivery);
+    if (cacheStats) renderCacheStats(cacheStats);
+    loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch {
@@ -294,6 +342,86 @@ async function resetDriftBaseline() {
     const data = await res.json();
     if (data.acknowledged) { loadAdmin(); }
   } catch {}
+}
+
+function renderDeliveryHealth(d) {
+  const el = $("deliveryBlock");
+  if (!el) return;
+  const byStatus = d.byStatus || [];
+  const byChannel = d.byChannel || [];
+  let html = "";
+  for (const s of byStatus) {
+    const color = s.status === "delivered" ? "green" : s.status === "failed" ? "red" : s.status === "throttled" ? "amber" : "";
+    html += `<div class="kv"><span class="k">${esc(s.status)}</span><span class="v ${color}">${s.count}</span></div>`;
+  }
+  if (d.avgLatencyMs != null) html += `<div class="kv"><span class="k">Avg Latency</span><span class="v">${Math.round(d.avgLatencyMs)}ms</span></div>`;
+  el.innerHTML = html || '<div style="color:#4b5563;font-size:12px">No delivery data</div>';
+}
+
+function renderCacheStats(c) {
+  const el = $("cacheBlock");
+  if (!el) return;
+  el.innerHTML = `
+    <div class="kv"><span class="k">Entries</span><span class="v blue">${c.entries ?? 0}</span></div>
+    <div class="kv"><span class="k">Hit Rate</span><span class="v green">${c.hitRate ?? 0}%</span></div>
+    <div class="kv"><span class="k">Hits / Misses</span><span class="v">${c.hits ?? 0} / ${c.misses ?? 0}</span></div>
+  `;
+}
+
+async function loadSubscribers() {
+  const el = $("subscriberList");
+  if (!el) return;
+  const plan = $("subFilter")?.value || "";
+  const url = "/api/admin/subscribers" + (plan ? "?plan=" + plan : "");
+  try {
+    const subs = await fetch(url).then(r => r.json());
+    if (!Array.isArray(subs) || subs.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No subscribers found</div>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Email</th>
+        <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Plan</th>
+        <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Status</th>
+        <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Platforms</th>
+        <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Created</th>
+      </tr></thead>
+      <tbody>${subs.map(s => {
+        const planColor = s.plan === "pro" ? "color:#c084fc" : s.plan === "basic" ? "color:#60a5fa" : "color:#6b7280";
+        const statusColor = s.status === "active" ? "color:#34d399" : s.status === "cancelled" ? "color:#f87171" : "color:#fbbf24";
+        const platforms = [s.telegram_user_id ? "TG" : null, s.discord_user_id ? "DC" : null].filter(Boolean).join(", ") || "-";
+        const created = s.created_at ? new Date(s.created_at).toLocaleDateString() : "-";
+        return `<tr style="border-bottom:1px solid #141420">
+          <td style="padding:6px 8px;color:#e5e7eb">${esc(s.email)}</td>
+          <td style="padding:6px 8px;${planColor};font-weight:600;text-transform:uppercase">${s.plan}</td>
+          <td style="padding:6px 8px;${statusColor}">${s.status}</td>
+          <td style="padding:6px 8px;color:#6b7280">${platforms}</td>
+          <td style="padding:6px 8px;color:#4b5563">${created}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>`;
+  } catch {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Failed to load subscribers</div>';
+  }
+}
+
+async function grantComp() {
+  const email = $("compEmail")?.value;
+  const plan = $("compPlan")?.value || "pro";
+  const days = Number($("compDays")?.value) || 30;
+  if (!email) return;
+  try {
+    const res = await fetch("/api/admin/grant-comp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, plan, days })
+    });
+    const data = await res.json();
+    const el = $("compResult");
+    if (el) { el.textContent = data.message || "Done"; el.style.display = "block"; }
+    loadSubscribers();
+  } catch (err) {
+    const el = $("compResult");
+    if (el) { el.textContent = "Error: " + err.message; el.style.display = "block"; el.style.color = "#f87171"; }
+  }
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

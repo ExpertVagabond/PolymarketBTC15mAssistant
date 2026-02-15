@@ -36,6 +36,11 @@ import { getQueueStatus, getRecentQueue, replayDelivery, startQueueProcessor, pu
 import { getPortfolioRisk } from "../portfolio/risk-attribution.js";
 import { getUserDeliveryAudit, getGlobalDeliveryStats } from "../notifications/delivery-audit.js";
 import { extractPlan, getPlanLimits, planRequired } from "./plan-gates.js";
+import { createCheckoutUrl } from "../subscribers/stripe-webhook.js";
+import { startTrial, getTrialStatus } from "../subscribers/trial.js";
+import { getOrCreateReferralCode, claimReferral, getReferralStats } from "../referrals/tracker.js";
+import { listAllSubscribers, grantCompAccess } from "../subscribers/manager.js";
+import { getCacheStats, cachedResponse } from "./cache.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -161,34 +166,36 @@ export async function startWebServer(opts = {}) {
 
   app.get("/api/public-stats", async (req) => {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
-    const stats = getSignalStats();
-    const perf = getPerformanceSummary(days);
-    const ts = getTimeSeries(days);
-    const dd = getDrawdownStats();
-    const cal = getCalibration();
+    return cachedResponse(`public-stats:${days}`, 300_000, () => {
+      const stats = getSignalStats();
+      const perf = getPerformanceSummary(days);
+      const ts = getTimeSeries(days);
+      const dd = getDrawdownStats();
+      const cal = getCalibration();
 
-    return {
-      period: `${days}d`,
-      winRate: stats.winRate,
-      totalSignals: stats.totalSignals,
-      settled: (stats.wins || 0) + (stats.losses || 0),
-      wins: stats.wins || 0,
-      losses: stats.losses || 0,
-      totalPnl: perf.total_pnl,
-      avgPnl: perf.avg_pnl,
-      sharpe: perf.sharpe,
-      maxDrawdown: dd.maxDrawdown,
-      bestTrade: perf.best_trade,
-      worstTrade: perf.worst_trade,
-      avgConfidence: perf.avg_confidence,
-      byCategory: stats.byCategory || [],
-      byStrength: stats.byStrength || [],
-      timeSeries: ts.slice(-30),
-      calibration: cal,
-      equityCurve: (dd.equityCurve || []).slice(-90),
-      streak: dd.currentStreak,
-      timestamp: new Date().toISOString()
-    };
+      return {
+        period: `${days}d`,
+        winRate: stats.winRate,
+        totalSignals: stats.totalSignals,
+        settled: (stats.wins || 0) + (stats.losses || 0),
+        wins: stats.wins || 0,
+        losses: stats.losses || 0,
+        totalPnl: perf.total_pnl,
+        avgPnl: perf.avg_pnl,
+        sharpe: perf.sharpe,
+        maxDrawdown: dd.maxDrawdown,
+        bestTrade: perf.best_trade,
+        worstTrade: perf.worst_trade,
+        avgConfidence: perf.avg_confidence,
+        byCategory: stats.byCategory || [],
+        byStrength: stats.byStrength || [],
+        timeSeries: ts.slice(-30),
+        calibration: cal,
+        equityCurve: (dd.equityCurve || []).slice(-90),
+        streak: dd.currentStreak,
+        timestamp: new Date().toISOString()
+      };
+    });
   });
 
   /* ── Signal History API ── */
@@ -202,7 +209,7 @@ export async function startWebServer(opts = {}) {
   });
 
   app.get("/api/signals/stats", async () => {
-    return getSignalStats();
+    return cachedResponse("signals-stats", 30_000, () => getSignalStats());
   });
 
   /* ── Analytics API ── */
@@ -213,11 +220,11 @@ export async function startWebServer(opts = {}) {
   });
 
   app.get("/api/analytics/calibration", async () => {
-    return getCalibration();
+    return cachedResponse("analytics-calibration", 120_000, () => getCalibration());
   });
 
   app.get("/api/analytics/drawdown", async () => {
-    return getDrawdownStats();
+    return cachedResponse("analytics-drawdown", 120_000, () => getDrawdownStats());
   });
 
   app.get("/api/analytics/performance", async (req) => {
@@ -604,6 +611,77 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     const days = Math.max(Number(req.query.days) || 7, 1);
     const result = purgeQueue(days);
     return { purged: result.changes };
+  });
+
+  /* ── Stripe Checkout API ── */
+
+  app.post("/api/checkout/create", { preHandler: requireAuth }, async (req) => {
+    const plan = req.body?.plan || "basic";
+    const priceId = plan === "pro" ? process.env.STRIPE_PRICE_PRO : process.env.STRIPE_PRICE_BASIC;
+    if (!priceId) return { error: "stripe_not_configured", message: "Set STRIPE_PRICE_BASIC / STRIPE_PRICE_PRO env vars" };
+    const email = req.sessionUser?.email;
+    try {
+      const url = await createCheckoutUrl({ priceId, email, metadata: { plan, source: "web" } });
+      return { url };
+    } catch (err) {
+      return { error: "checkout_failed", message: err.message };
+    }
+  });
+
+  /* ── Free Trial API ── */
+
+  app.post("/api/trial/start", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return startTrial(email);
+  });
+
+  app.get("/api/trial/status", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getTrialStatus(email);
+  });
+
+  /* ── Referral API ── */
+
+  app.get("/api/referral/code", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getOrCreateReferralCode(email);
+  });
+
+  app.post("/api/referral/claim", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    const code = req.body?.code;
+    if (!email || !code) return { error: "missing_params" };
+    return claimReferral(code, email);
+  });
+
+  app.get("/api/referral/stats", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getReferralStats(email);
+  });
+
+  /* ── Admin: User Management ── */
+
+  app.get("/api/admin/subscribers", { preHandler: requireAuth }, async (req) => {
+    const plan = req.query.plan || null;
+    const status = req.query.status || null;
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return listAllSubscribers({ plan, status, limit });
+  });
+
+  app.post("/api/admin/grant-comp", { preHandler: requireAuth }, async (req) => {
+    const email = req.body?.email;
+    const days = Math.min(Number(req.body?.days) || 30, 365);
+    const plan = req.body?.plan || "pro";
+    if (!email) return { error: "missing_email" };
+    return grantCompAccess(email, plan, days);
+  });
+
+  app.get("/api/admin/cache-stats", async () => {
+    return getCacheStats();
   });
 
   /* ── API Key Auth (X-API-Key header) ── */

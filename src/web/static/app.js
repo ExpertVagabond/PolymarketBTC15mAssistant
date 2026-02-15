@@ -32,6 +32,21 @@ async function loadUserPlan() {
     }
   } catch { /* not logged in = free */ }
   applyPlanUI();
+  loadTrialStatus();
+}
+
+async function loadTrialStatus() {
+  try {
+    const res = await fetch("/api/trial/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    const el = $("trialBadge");
+    if (data.active && data.daysRemaining != null && el) {
+      el.textContent = `Trial: ${data.daysRemaining}d left`;
+      el.style.display = "";
+      el.style.color = data.daysRemaining <= 2 ? "#f87171" : "#fbbf24";
+    }
+  } catch { /* not logged in */ }
 }
 
 function applyPlanUI() {
@@ -1779,6 +1794,7 @@ async function loadSettings() {
       loadWebhooks();
       loadEmailPrefs();
       loadDeliveryAudit();
+      loadReferralSection();
     }
   } catch { /* not logged in */ }
 
@@ -1831,6 +1847,59 @@ async function loadDeliveryAudit() {
     el.innerHTML = '<div style="color:#4b5563;font-size:12px">Login to view delivery audit</div>';
   }
 }
+
+async function loadReferralSection() {
+  const el = $("referralBlock");
+  if (!el) return;
+  try {
+    const data = await fetch("/api/referral/code").then(r => r.json());
+    if (data.error) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">Login to view referral code</div>'; return; }
+
+    const appUrl = window.location.origin;
+    const link = `${appUrl}/?ref=${data.code}`;
+    el.innerHTML = `
+      <div class="settings-row">
+        <span class="settings-label">Your code</span>
+        <span class="settings-val" style="font-family:monospace;color:#a5b4fc">${esc(data.code)}</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Referral link</span>
+        <span style="font-size:10px;font-family:monospace;color:#6b7280;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(link)}</span>
+        <button class="settings-btn" onclick="navigator.clipboard.writeText('${link}');showToast('Copied!','success')">Copy</button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Referrals completed</span>
+        <span class="settings-val" style="color:#34d399">${data.completed || 0}</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Rewards earned</span>
+        <span class="settings-val">${data.rewards || 0} free months</span>
+      </div>
+      ${data.untilNextReward > 0 ? `<div style="font-size:11px;color:#6b7280;margin-top:6px">${data.untilNextReward} more referrals until your next free month!</div>` : ""}
+    `;
+  } catch {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Login to view referral code</div>';
+  }
+}
+
+async function startTrialFromSettings() {
+  try {
+    const res = await fetch("/api/trial/start", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(data.message || "Trial started!", "success");
+      loadUserPlan();
+      loadTrialStatus();
+      const btn = $("startTrialBtn");
+      if (btn) { btn.textContent = "Trial Active"; btn.disabled = true; }
+    } else {
+      showToast(data.message || data.error || "Could not start trial", "error");
+    }
+  } catch (err) {
+    showToast("Error: " + err.message, "error");
+  }
+}
+window.startTrialFromSettings = startTrialFromSettings;
 
 async function settingsLogin() {
   const email = prompt("Enter your email for a magic link:");

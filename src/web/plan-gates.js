@@ -8,6 +8,7 @@
 
 import { verifySession } from "./auth.js";
 import { verifyKey } from "../subscribers/api-keys.js";
+import { checkTrialActive } from "../subscribers/trial.js";
 
 const PLAN_LIMITS = {
   free: {
@@ -51,7 +52,15 @@ export function extractPlan(req) {
     const match = cookieHeader.match(/(?:^|;)\s*session=([^;]*)/);
     if (match) {
       const session = verifySession(decodeURIComponent(match[1]));
-      if (session) return session.plan || "free";
+      if (session) {
+        const plan = session.plan || "free";
+        // Check if user has an active trial that overrides their plan
+        if (plan === "free" && session.email) {
+          const trialPlan = checkTrialActive(session.email);
+          if (trialPlan) return trialPlan;
+        }
+        return plan;
+      }
     }
   }
 

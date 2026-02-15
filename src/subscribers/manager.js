@@ -143,3 +143,30 @@ export function listActiveSubscribers() {
 export function listPaidSubscribers() {
   return getDb().prepare("SELECT * FROM subscribers WHERE status = 'active' AND plan IN ('basic', 'pro') ORDER BY created_at DESC").all();
 }
+
+/* ── admin: list all subscribers with filters ── */
+
+export function listAllSubscribers({ plan = null, status = null, limit = 50 } = {}) {
+  const db = getDb();
+  let sql = "SELECT id, email, plan, status, created_at, expires_at, telegram_user_id, discord_user_id FROM subscribers WHERE 1=1";
+  const params = [];
+  if (plan) { sql += " AND plan = ?"; params.push(plan); }
+  if (status) { sql += " AND status = ?"; params.push(status); }
+  sql += " ORDER BY created_at DESC LIMIT ?";
+  params.push(limit);
+  return db.prepare(sql).all(...params);
+}
+
+/* ── admin: grant complimentary access ── */
+
+export function grantCompAccess(email, plan = "pro", days = 30) {
+  const db = getDb();
+  const sub = getByEmail(email);
+  if (!sub) {
+    // Create a new subscriber with comp access
+    db.prepare("INSERT INTO subscribers (email, plan, status, expires_at) VALUES (?, ?, 'active', datetime('now', '+' || ? || ' days'))").run(email, plan, days);
+    return { ok: true, email, plan, days, message: `Granted ${days}-day ${plan} access to ${email}` };
+  }
+  db.prepare("UPDATE subscribers SET plan = ?, status = 'active', expires_at = datetime('now', '+' || ? || ' days') WHERE email = ?").run(plan, days, email);
+  return { ok: true, email, plan, days, message: `Extended ${days}-day ${plan} access for ${email}` };
+}
