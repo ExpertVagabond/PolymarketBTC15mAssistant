@@ -14,6 +14,8 @@ import { computeRsi, sma, slopeLast } from "../indicators/rsi.js";
 import { computeMacd } from "../indicators/macd.js";
 import { computeHeikenAshi, countConsecutive } from "../indicators/heikenAshi.js";
 import { computeATR, computeBollingerWidth, classifyVolatility } from "../indicators/volatility.js";
+import { computeConfluence } from "../engines/confluence.js";
+import { getBtcMacroState, computeCorrelationAdj } from "../engines/correlation.js";
 import { detectRegime } from "../engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "../engines/probability.js";
 import { computeEdge, decide } from "../engines/edge.js";
@@ -163,6 +165,12 @@ export function createMarketPoller(market) {
       ? (market.category === "Up or Down" || market.category === "15M" ? 15 : 60)
       : 240; // CLOB hourly candles: trends persist for ~4 hours
 
+    // Multi-timeframe confluence (crypto only, cached across pollers)
+    const confluenceData = isCrypto ? await computeConfluence() : null;
+
+    // BTC macro state for cross-market correlation (crypto only)
+    if (isCrypto) await getBtcMacroState(); // Ensure BTC state is fresh
+
     // Engines
     const regimeInfo = detectRegime({ price: lastPrice, vwap: vwapNow, vwapSlope, vwapCrossCount, volumeRecent, volumeAvg });
     const scored = scoreDirection({ price: lastPrice, vwap: vwapNow, vwapSlope, rsi: rsiNow, rsiSlope, macd, heikenColor: consec.color, heikenCount: consec.count, failedVwapReclaim, orderbookImbalance });
@@ -171,12 +179,25 @@ export function createMarketPoller(market) {
     const marketUp = snapshot.ok ? snapshot.prices.up : null;
     const marketDown = snapshot.ok ? snapshot.prices.down : null;
     const edge = computeEdge({ modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown, marketYes: marketUp, marketNo: marketDown });
+
+    // Determine preliminary side for correlation adjustment
+    const prelimSide = edge.edgeUp > edge.edgeDown ? "UP" : "DOWN";
+    const corrAdj = isCrypto ? computeCorrelationAdj(market, prelimSide) : { correlationAdj: 1.0, reason: "non_crypto" };
+
+    // Apply confluence + correlation as combined multiplier on vol threshold
+    const confluenceMult = confluenceData?.confluenceMultiplier ?? 1.0;
+    // Confluence boosts/suppresses the effective vol multiplier:
+    // If all timeframes agree with the signal → lower threshold (easier to trigger)
+    // If timeframes conflict → raise threshold (harder to trigger)
+    const effectiveVolMult = volInfo.volMultiplier / confluenceMult;
+
     const rec = decide({
       remainingMinutes: timeLeftMin,
-      edgeUp: edge.edgeUp, edgeDown: edge.edgeDown,
+      edgeUp: edge.edgeUp * corrAdj.correlationAdj,
+      edgeDown: edge.edgeDown * corrAdj.correlationAdj,
       modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown,
       regime: regimeInfo.regime, category: market.category,
-      volMultiplier: volInfo.volMultiplier
+      volMultiplier: effectiveVolMult
     });
 
     const signal = rec.action === "ENTER" ? (rec.side === "UP" ? "BUY YES" : "BUY NO") : "NO TRADE";
@@ -199,6 +220,15 @@ export function createMarketPoller(market) {
       atrPct: atrData?.atrPct ?? null,
       bbWidth: bbData?.width ?? null,
       bbSqueeze: bbData?.squeeze ?? false,
+      confluence: confluenceData ? {
+        score: confluenceData.confluence,
+        direction: confluenceData.direction,
+        multiplier: confluenceData.confluenceMultiplier
+      } : null,
+      correlation: {
+        adj: corrAdj.correlationAdj,
+        reason: corrAdj.reason
+      },
       prices: { last: lastPrice, up: marketUp, down: marketDown },
       indicators: {
         vwap: vwapNow, vwapSlope, vwapDist,

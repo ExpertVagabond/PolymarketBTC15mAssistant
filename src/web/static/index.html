@@ -123,6 +123,31 @@
     .time-val.urgent { color: #fbbf24; }
     .time-val.imminent { color: #f87171; }
 
+    /* ── Signal card badges (confluence, volatility, correlation) ── */
+    .conf-badge { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-left: 4px; background: #3b82f618; color: #60a5fa; }
+    .conf-badge.conf-3 { background: #34d39920; color: #34d399; }
+    .conf-badge.conf-2 { background: #3b82f618; color: #60a5fa; }
+    .conf-badge.conf-1 { background: #37415118; color: #6b7280; }
+    .conf-badge.conf-0 { background: #f8717118; color: #fca5a5; }
+
+    .vol-badge { font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 4px; margin-left: 4px; }
+    .vol-badge.vol-lowvol { background: #60a5fa18; color: #93c5fd; }
+    .vol-badge.vol-normalvol { background: #37415118; color: #6b7280; }
+    .vol-badge.vol-highvol { background: #f8717118; color: #fca5a5; }
+
+    .corr-note { font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 4px; margin-left: 4px; background: #fbbf2418; color: #fcd34d; }
+
+    /* ── Table vol/conf pills ── */
+    .vol-pill { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }
+    .vol-pill.low { background: #60a5fa18; color: #93c5fd; }
+    .vol-pill.normal { background: #37415118; color: #4b5563; }
+    .vol-pill.high { background: #f8717118; color: #fca5a5; }
+    .conf-pill { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }
+    .conf-pill.c3 { background: #34d39918; color: #34d399; }
+    .conf-pill.c2 { background: #3b82f618; color: #60a5fa; }
+    .conf-pill.c1 { background: #37415118; color: #6b7280; }
+    .conf-pill.c0 { background: #f8717118; color: #fca5a5; }
+
     /* ── Single-market mode (legacy fallback) ── */
     #singleMode { display: none; }
     #singleMode.visible { display: block; }
@@ -226,6 +251,8 @@
             <th>Market&nbsp;Price</th>
             <th>Edge</th>
             <th>RSI</th>
+            <th>Vol</th>
+            <th>TF</th>
             <th>Time Left</th>
             <th>Liquidity</th>
           </tr>

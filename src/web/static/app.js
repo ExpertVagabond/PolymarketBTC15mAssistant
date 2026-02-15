@@ -64,6 +64,18 @@ function renderSignalCards(signals) {
     // Time remaining
     const timeLeft = fmtSettlement(s.settlementLeftMin);
 
+    // Confluence badge
+    const conf = s.confluence;
+    const confBadge = conf ? `<span class="conf-badge conf-${conf.score}" title="${conf.direction} across ${conf.score} timeframe(s)">${conf.score}/3 TF</span>` : "";
+
+    // Volatility badge
+    const volBadge = s.volRegime ? `<span class="vol-badge vol-${s.volRegime.toLowerCase().replace("_","")}">${fmtVol(s.volRegime)}</span>` : "";
+
+    // Correlation indicator
+    const corrNote = s.correlation && s.correlation.adj !== 1.0
+      ? `<span class="corr-note" title="${s.correlation.reason}">BTC ${s.correlation.adj > 1 ? "+" : ""}${((s.correlation.adj - 1) * 100).toFixed(0)}%</span>`
+      : "";
+
     // Plain-English explanation
     const outcomeName = isYes ? "YES" : "NO";
     const timeNote = s.settlementLeftMin != null ? ` Market settles in <em>${timeLeft}</em>.` : "";
@@ -76,6 +88,7 @@ function renderSignalCards(signals) {
         <div class="sig-top">
           <span class="sig-action ${sideClass}">${sideLabel}</span>
           <span class="sig-badge ${badgeClass}">${str}</span>
+          ${confBadge}${volBadge}${corrNote}
         </div>
         <div class="sig-question">${esc(s.question || "Unknown market")}</div>
         <div class="sig-metrics">
@@ -135,6 +148,15 @@ function renderMarketsTable(markets) {
     const rsiStr = m.rsi != null ? m.rsi.toFixed(0) : "-";
     const rsiColor = m.rsi > 70 ? "red" : m.rsi < 30 ? "green" : "";
 
+    // Volatility regime
+    const volLabel = m.volRegime ? fmtVol(m.volRegime) : "-";
+    const volClass = m.volRegime === "HIGH_VOL" ? "high" : m.volRegime === "LOW_VOL" ? "low" : "normal";
+
+    // Confluence
+    const confScore = m.confluence != null ? m.confluence : null;
+    const confLabel = confScore != null ? confScore + "/3" : "-";
+    const confClass = confScore === 3 ? "c3" : confScore === 2 ? "c2" : confScore >= 1 ? "c1" : "c0";
+
     // Time remaining
     const timeStr = fmtSettlement(m.settlementLeftMin);
     const timeClass = m.settlementLeftMin != null
@@ -159,6 +181,8 @@ function renderMarketsTable(markets) {
       <td class="price-pair"><span class="price-yes">${yesPrice}</span><span class="price-sep">/</span><span class="price-no">${noPrice}</span></td>
       <td><span class="edge-bar"><span class="${edgeColor}">${edgeStr}</span>${edgeWidth > 0 ? `<span class="edge-fill ${edgeFillClass}" style="width:${edgeWidth}px"></span>` : ""}</span></td>
       <td class="${rsiColor}">${rsiStr}</td>
+      <td>${m.volRegime ? `<span class="vol-pill ${volClass}">${volLabel}</span>` : "-"}</td>
+      <td>${confScore != null ? `<span class="conf-pill ${confClass}">${confLabel}</span>` : "-"}</td>
       <td class="time-val ${timeClass}">${timeStr}</td>
       <td class="liq-val">${liq}</td>
     </tr>`;
@@ -287,6 +311,11 @@ function fmtSettlement(min) {
 function fmtTime(min) {
   const m = Math.floor(Math.max(0, min)), s = Math.floor((Math.max(0, min) - m) * 60);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function fmtVol(regime) {
+  if (!regime) return "";
+  return regime.replace("_VOL", "").replace("_", " ");
 }
 
 function esc(s) {

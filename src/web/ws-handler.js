@@ -83,6 +83,10 @@ export function broadcastScannerState({ state, signals, stats }) {
         liquidity: t.market?.liquidity ?? entry.market?.liquidity ?? 0,
         regime: t.regimeInfo?.regime ?? null,
         rsi: t.indicators?.rsi ?? null,
+        volRegime: t.volRegime ?? null,
+        confluence: t.confluence ? t.confluence.score : null,
+        confDirection: t.confluence ? t.confluence.direction : null,
+        corrAdj: t.correlation?.adj ?? null,
         settlementLeftMin: t.settlementLeftMin ?? t.market?.settlementLeftMin ?? null,
         timestamp: t.timestamp
       });
@@ -104,7 +108,10 @@ export function broadcastScannerState({ state, signals, stats }) {
       edge: s.rec?.side === "UP" ? s.edge?.edgeUp : s.edge?.edgeDown,
       priceUp: s.prices?.up,
       priceDown: s.prices?.down,
-      settlementLeftMin: s.settlementLeftMin ?? s.market?.settlementLeftMin ?? null
+      settlementLeftMin: s.settlementLeftMin ?? s.market?.settlementLeftMin ?? null,
+      volRegime: s.volRegime ?? null,
+      confluence: s.confluence ?? null,
+      correlation: s.correlation ?? null
     })),
     markets
   });
