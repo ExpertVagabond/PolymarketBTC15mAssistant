@@ -290,7 +290,9 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/calibration", desc: "Confidence calibration: actual vs expected win rate per confidence decile, flags miscalibrated buckets", tryable: true },
     { method: "GET", path: "/api/trading/attribution?days=30", desc: "P&L attribution: performance breakdown by quality tier, regime, category, hour, sizing method, strength", tryable: true },
     { method: "GET", path: "/api/trading/regime-history", desc: "Regime transition tracker: current regime distribution and per-market transition history with stability", tryable: true },
-    { method: "GET", path: "/api/trading/category-weights", desc: "Per-category learned indicator weights, global model version, combo multipliers, and category tuning parameters", tryable: true }
+    { method: "GET", path: "/api/trading/category-weights", desc: "Per-category learned indicator weights, global model version, combo multipliers, and category tuning parameters", tryable: true },
+    { method: "GET", path: "/api/trading/slippage?days=30", desc: "Slippage analysis: overall avg, breakdown by size bucket, category, and hour-of-day", tryable: true },
+    { method: "GET", path: "/api/trading/anomalies", desc: "Rolling performance anomaly detection: compares recent 20 trades vs 100-trade baseline for win rate, Sharpe, P&L degradation", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

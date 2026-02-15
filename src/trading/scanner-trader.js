@@ -17,6 +17,7 @@ import { logAuditEvent } from "./audit-log.js";
 import { getConfigValue } from "./trading-config.js";
 import { broadcastTradeEvent } from "../web/ws-handler.js";
 import { computeSignalQuality } from "../engines/signal-quality.js";
+import { getQualityTierWinRates, getDayOfWeekWinRate } from "./execution-log.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
@@ -25,6 +26,54 @@ const MIN_STRENGTH = new Set(["STRONG", "GOOD"]);
 let signalCount = 0;
 let tradeCount = 0;
 const filterStats = { dedup: 0, cooldown: 0, correlated: 0, settlement: 0, spread: 0, chop: 0, risk: 0, quality: 0 };
+
+// Adaptive quality gate
+const DEFAULT_MIN_QUALITY = 30;
+let adaptiveMinQuality = DEFAULT_MIN_QUALITY;
+let lastQualityRefresh = 0;
+const QUALITY_REFRESH_MS = 10 * 60_000; // 10 minutes
+
+/**
+ * Recompute the adaptive quality threshold from recent performance.
+ * Finds the lowest quality tier where win rate >= 50% with enough samples.
+ * Falls back to DEFAULT_MIN_QUALITY if insufficient data.
+ */
+function refreshAdaptiveQuality() {
+  try {
+    const tiers = getQualityTierWinRates();
+    if (!tiers || tiers.length === 0) return;
+
+    // Need at least 30 total settled trades across all tiers
+    const totalTrades = tiers.reduce((s, t) => s + t.trades, 0);
+    if (totalTrades < 30) return;
+
+    // Find lowest quality tier with win rate >= 50% and at least 5 samples
+    let bestThreshold = DEFAULT_MIN_QUALITY;
+    for (const tier of tiers) {
+      if (tier.trades >= 5 && tier.winRate != null && tier.winRate >= 50) {
+        bestThreshold = tier.tier;
+        break; // tiers are sorted ascending, first match = lowest profitable tier
+      }
+    }
+
+    // Clamp between 20 and 60 to prevent extreme values
+    const newThreshold = Math.max(20, Math.min(60, bestThreshold));
+    if (newThreshold !== adaptiveMinQuality) {
+      console.log(`[scanner-trader] Quality gate adjusted: ${adaptiveMinQuality} → ${newThreshold} (from ${totalTrades} settled trades)`);
+      adaptiveMinQuality = newThreshold;
+    }
+  } catch {
+    // Keep current threshold on error
+  }
+  lastQualityRefresh = Date.now();
+}
+
+function getAdaptiveMinQuality() {
+  if (Date.now() - lastQualityRefresh > QUALITY_REFRESH_MS) {
+    refreshAdaptiveQuality();
+  }
+  return adaptiveMinQuality;
+}
 
 /**
  * Attach trading pipeline to an orchestrator instance.
@@ -121,6 +170,18 @@ async function processSignal(tick) {
     else if (hourStats.winRate > 65) hourMultiplier = 1.1;
   }
 
+  // Day-of-week modifier: reduce sizing on historically bad days
+  const currentDay = new Date().getUTCDay(); // 0=Sun, 6=Sat
+  const dayStats = getDayOfWeekWinRate(currentDay);
+  let dayMultiplier = 1.0;
+  if (dayStats && dayStats.sampleSize >= 10) {
+    if (dayStats.winRate < 40) dayMultiplier = 0.7;
+    else if (dayStats.winRate > 65) dayMultiplier = 1.1;
+  } else if (currentDay === 0 || currentDay === 6) {
+    // Default weekend penalty when insufficient data (lower liquidity)
+    dayMultiplier = 0.85;
+  }
+
   // Check risk limits (with category for concentration check)
   const riskCheck = canTrade(category);
   if (!riskCheck.allowed) {
@@ -133,7 +194,7 @@ async function processSignal(tick) {
   const edge = rec.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
   const sizing = getKellyBetSize(tick);
   const recoveryMult = getRecoveryMultiplier();
-  const betSize = Math.max(0.1, sizing.amount * regimeMultiplier * hourMultiplier * recoveryMult);
+  const betSize = Math.max(0.1, sizing.amount * regimeMultiplier * hourMultiplier * dayMultiplier * recoveryMult);
   const tokenId = rec.side === "UP"
     ? (tick.poly?.tokens?.upTokenId || tick.tokens?.upTokenId)
     : (tick.poly?.tokens?.downTokenId || tick.tokens?.downTokenId);
@@ -142,19 +203,20 @@ async function processSignal(tick) {
     : (tick.prices?.down ?? 0.5);
   const confidence = tick.confidence ?? null;
 
-  // Composite signal quality gate
+  // Composite signal quality gate (adaptive threshold)
   const qualityResult = computeSignalQuality(tick, { streakMultiplier: sizing.streakMult ?? 1.0, hourMultiplier, regimeMultiplier });
   const quality = qualityResult.quality;
-  if (quality < 30) {
+  const minQuality = getAdaptiveMinQuality();
+  if (quality < minQuality) {
     filterStats.quality++;
-    console.log(`[scanner-trader] SKIP: quality too low (${quality}/100) | ${tick.market?.slug || marketId}`);
+    console.log(`[scanner-trader] SKIP: quality too low (${quality}/${minQuality}) | ${tick.market?.slug || marketId}`);
     return;
   }
 
   // Decision context — persisted with every execution for post-hoc analysis
-  const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, sizingMethod: sizing.method };
+  const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, dayMult: dayMultiplier, sizingMethod: sizing.method };
 
-  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""})`);
+  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality}/${minQuality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""}${dayMultiplier < 1 ? `*${dayMultiplier}x/day` : ""})`);
 
   // Dry run path
   if (!ENABLED || DRY_RUN) {
@@ -303,7 +365,8 @@ export function getScannerTraderStats() {
     apiConfigured: isTradingConfigured(),
     risk: getRiskStatus(),
     botControl: getBotControlState(),
-    filters: { ...filterStats }
+    filters: { ...filterStats },
+    adaptiveMinQuality
   };
 }
 
@@ -312,5 +375,5 @@ export function getScannerTraderStats() {
  */
 export function getFilterStats() {
   const totalFiltered = Object.values(filterStats).reduce((a, b) => a + b, 0);
-  return { signalsReceived: signalCount, tradesExecuted: tradeCount, totalFiltered, ...filterStats };
+  return { signalsReceived: signalCount, tradesExecuted: tradeCount, totalFiltered, ...filterStats, adaptiveMinQuality };
 }

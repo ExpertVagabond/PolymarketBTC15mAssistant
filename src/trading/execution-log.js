@@ -49,14 +49,15 @@ function ensureTable() {
   if (!cols.includes("streak_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN streak_mult REAL");
   if (!cols.includes("hour_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN hour_mult REAL");
   if (!cols.includes("sizing_method")) db.exec("ALTER TABLE trade_executions ADD COLUMN sizing_method TEXT");
+  if (!cols.includes("day_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN day_mult REAL");
 
   stmts = {
     insert: db.prepare(`
       INSERT INTO trade_executions (
         signal_id, market_id, token_id, question, category, side, strength,
         amount, entry_price, fill_price, status, dry_run, order_id, edge,
-        confidence, liquidity_check, error, quality, regime, streak_mult, hour_mult, sizing_method
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        confidence, liquidity_check, error, quality, regime, streak_mult, hour_mult, sizing_method, day_mult
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     close: db.prepare(`
       UPDATE trade_executions
@@ -98,7 +99,7 @@ export function logExecution({
   signalId, marketId, tokenId, question, category, side, strength,
   amount, entryPrice, fillPrice, status = "open", dryRun = true,
   orderId, edge, confidence, liquidityCheck, error,
-  quality, regime, streakMult, hourMult, sizingMethod
+  quality, regime, streakMult, hourMult, sizingMethod, dayMult
 }) {
   ensureTable();
   const info = stmts.insert.run(
@@ -108,7 +109,7 @@ export function logExecution({
     edge || null, confidence || null,
     liquidityCheck ? JSON.stringify(liquidityCheck) : null,
     error || null,
-    quality ?? null, regime || null, streakMult ?? null, hourMult ?? null, sizingMethod || null
+    quality ?? null, regime || null, streakMult ?? null, hourMult ?? null, sizingMethod || null, dayMult ?? null
   );
   return info.lastInsertRowid;
 }
@@ -749,4 +750,214 @@ export function getConfidenceCalibration() {
       underconfident: underconfident.map(b => b.bucket)
     }
   };
+}
+
+/**
+ * Analyze slippage: difference between entry_price and fill_price.
+ * Positive slippage = filled worse than expected, negative = filled better.
+ * Returns overall stats, by size bucket, by category, and by hour.
+ */
+export function getSlippageAnalysis(days = 30) {
+  ensureTable();
+  const db = getDb();
+  const daysOffset = `-${Math.min(Math.max(days, 1), 180)} days`;
+
+  // Overall slippage stats
+  const overall = db.prepare(`
+    SELECT
+      COUNT(*) as trades,
+      AVG(ABS(fill_price - entry_price)) as avg_abs_slippage,
+      AVG(fill_price - entry_price) as avg_slippage,
+      MAX(ABS(fill_price - entry_price)) as max_slippage,
+      SUM(CASE WHEN fill_price > entry_price THEN 1 ELSE 0 END) as worse_fills,
+      SUM(CASE WHEN fill_price < entry_price THEN 1 ELSE 0 END) as better_fills,
+      SUM(CASE WHEN fill_price = entry_price THEN 1 ELSE 0 END) as exact_fills
+    FROM trade_executions
+    WHERE status = 'closed'
+      AND entry_price IS NOT NULL AND fill_price IS NOT NULL
+      AND entry_price != fill_price
+      AND opened_at >= datetime('now', ?)
+  `).get(daysOffset);
+
+  // Slippage by size bucket
+  const bySize = db.prepare(`
+    SELECT
+      CASE
+        WHEN amount < 1 THEN '<$1'
+        WHEN amount < 5 THEN '$1-5'
+        WHEN amount < 10 THEN '$5-10'
+        ELSE '$10+'
+      END as size_bucket,
+      COUNT(*) as trades,
+      AVG(ABS(fill_price - entry_price)) as avg_slippage,
+      AVG(amount) as avg_amount
+    FROM trade_executions
+    WHERE status = 'closed'
+      AND entry_price IS NOT NULL AND fill_price IS NOT NULL
+      AND opened_at >= datetime('now', ?)
+    GROUP BY size_bucket
+    ORDER BY avg_amount ASC
+  `).all(daysOffset);
+
+  // Slippage by category
+  const byCategory = db.prepare(`
+    SELECT
+      category,
+      COUNT(*) as trades,
+      AVG(ABS(fill_price - entry_price)) as avg_slippage,
+      MAX(ABS(fill_price - entry_price)) as max_slippage
+    FROM trade_executions
+    WHERE status = 'closed'
+      AND entry_price IS NOT NULL AND fill_price IS NOT NULL
+      AND category IS NOT NULL
+      AND opened_at >= datetime('now', ?)
+    GROUP BY category
+    HAVING trades >= 2
+    ORDER BY avg_slippage DESC
+  `).all(daysOffset);
+
+  // Slippage by hour (UTC)
+  const byHour = db.prepare(`
+    SELECT
+      CAST(strftime('%H', opened_at) AS INTEGER) as hour,
+      COUNT(*) as trades,
+      AVG(ABS(fill_price - entry_price)) as avg_slippage
+    FROM trade_executions
+    WHERE status = 'closed'
+      AND entry_price IS NOT NULL AND fill_price IS NOT NULL
+      AND opened_at >= datetime('now', ?)
+    GROUP BY hour
+    HAVING trades >= 2
+    ORDER BY hour ASC
+  `).all(daysOffset);
+
+  // Round values
+  const round4 = v => v != null ? Math.round(v * 10000) / 10000 : null;
+  if (overall) {
+    overall.avg_abs_slippage = round4(overall.avg_abs_slippage);
+    overall.avg_slippage = round4(overall.avg_slippage);
+    overall.max_slippage = round4(overall.max_slippage);
+  }
+  for (const row of [...bySize, ...byCategory, ...byHour]) {
+    row.avg_slippage = round4(row.avg_slippage);
+    if (row.max_slippage != null) row.max_slippage = round4(row.max_slippage);
+  }
+
+  return { overall: overall || {}, bySize, byCategory, byHour, days };
+}
+
+/**
+ * Get day-of-week win rates from closed executions.
+ * Returns win rate and sample size for each day (0=Sunday, 6=Saturday).
+ */
+export function getDayOfWeekWinRate(dayOfWeek) {
+  ensureTable();
+  const db = getDb();
+
+  if (dayOfWeek != null) {
+    const row = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+      FROM trade_executions
+      WHERE status = 'closed' AND pnl_usd IS NOT NULL
+        AND CAST(strftime('%w', opened_at) AS INTEGER) = ?
+    `).get(dayOfWeek);
+    if (!row || row.total === 0) return null;
+    const settled = row.wins + row.losses;
+    return { dayOfWeek, sampleSize: settled, winRate: settled > 0 ? Math.round(row.wins / settled * 100) : null };
+  }
+
+  // All days
+  return db.prepare(`
+    SELECT
+      CAST(strftime('%w', opened_at) AS INTEGER) as day_of_week,
+      COUNT(*) as total,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL
+    GROUP BY day_of_week
+    ORDER BY day_of_week ASC
+  `).all().map(r => {
+    const settled = r.wins + r.losses;
+    return { dayOfWeek: r.day_of_week, sampleSize: settled, winRate: settled > 0 ? Math.round(r.wins / settled * 100) : null };
+  });
+}
+
+/**
+ * Get recent closed trade performance for anomaly detection.
+ * @param {number} n - Number of recent trades
+ * @returns {{ trades: number, wins: number, losses: number, winRate: number, avgPnlPct: number, totalPnl: number }}
+ */
+export function getRecentPerformance(n = 20) {
+  ensureTable();
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT pnl_usd, pnl_pct, quality, confidence
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL
+    ORDER BY closed_at DESC
+    LIMIT ?
+  `).all(n);
+
+  if (rows.length === 0) return { trades: 0, wins: 0, losses: 0, winRate: null, avgPnlPct: null, totalPnl: 0 };
+
+  let wins = 0, losses = 0, totalPnl = 0;
+  const pnlPcts = [];
+  for (const r of rows) {
+    if (r.pnl_usd > 0) wins++;
+    else losses++;
+    totalPnl += r.pnl_usd;
+    if (r.pnl_pct != null) pnlPcts.push(r.pnl_pct);
+  }
+
+  const settled = wins + losses;
+  const avgPnlPct = pnlPcts.length > 0 ? pnlPcts.reduce((a, b) => a + b, 0) / pnlPcts.length : null;
+
+  // Sharpe (simplified: mean/std of pnl_pct)
+  let sharpe = null;
+  if (pnlPcts.length > 1) {
+    const mean = avgPnlPct;
+    const variance = pnlPcts.reduce((sum, p) => sum + (p - mean) ** 2, 0) / (pnlPcts.length - 1);
+    const std = Math.sqrt(variance);
+    sharpe = std > 0 ? Math.round((mean / std) * 100) / 100 : null;
+  }
+
+  return {
+    trades: settled,
+    wins,
+    losses,
+    winRate: settled > 0 ? Math.round(wins / settled * 100) : null,
+    avgPnlPct: avgPnlPct != null ? Math.round(avgPnlPct * 100) / 100 : null,
+    totalPnl: Math.round(totalPnl * 100) / 100,
+    sharpe
+  };
+}
+
+/**
+ * Get quality tier win rates for adaptive threshold computation.
+ * Returns win rate per 10-point quality bucket.
+ */
+export function getQualityTierWinRates() {
+  ensureTable();
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      (quality / 10) * 10 as quality_tier,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL AND quality IS NOT NULL
+    ORDER BY quality_tier ASC
+  `).all().map(r => {
+    const settled = r.wins + r.losses;
+    return {
+      tier: r.quality_tier,
+      trades: settled,
+      winRate: settled > 0 ? Math.round(r.wins / settled * 100) : null
+    };
+  });
 }

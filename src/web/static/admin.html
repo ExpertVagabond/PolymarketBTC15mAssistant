@@ -214,6 +214,24 @@
       <div id="closeReasonsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Regime × Category Heatmap -->
+    <div class="card wide">
+      <div class="card-title">Regime × Category Performance</div>
+      <div id="heatmapBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Anomaly Detection -->
+    <div class="card">
+      <div class="card-title">Performance Anomalies</div>
+      <div id="anomalyBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Slippage Analysis -->
+    <div class="card">
+      <div class="card-title">Slippage Analysis</div>
+      <div id="slippageBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -277,7 +295,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -296,7 +314,10 @@ async function loadAdmin() {
       fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null),
       fetch("/api/trading/audit?days=1&limit=25").then(r => r.json()).catch(() => []),
       fetch("/api/trading/attribution?days=30").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/category-weights").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/category-weights").then(r => r.json()).catch(() => null),
+      fetch("/api/signals/regime-analytics?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/anomalies").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/slippage?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -316,6 +337,9 @@ async function loadAdmin() {
     if (auditEvents) renderAuditTimeline(auditEvents);
     if (attribution) renderAttribution(attribution);
     if (categoryWeights) renderCategoryIntel(categoryWeights);
+    if (regimeAnalytics) renderHeatmap(regimeAnalytics);
+    if (anomalyData) renderAnomalies(anomalyData);
+    if (slippageData) renderSlippage(slippageData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1001,6 +1025,90 @@ function handleTradeEvent(msg) {
   if (msg.event === "POSITION_OPENED" || msg.event === "POSITION_CLOSED") {
     loadAdmin();
   }
+}
+
+function renderHeatmap(data) {
+  const el = $("heatmapBlock");
+  if (!el) return;
+  const matrix = data.regimeCategoryMatrix || [];
+  if (matrix.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No regime×category data yet</div>'; return; }
+
+  // Build matrix: rows = regimes, cols = categories
+  const regimes = [...new Set(matrix.map(m => m.regime))];
+  const categories = [...new Set(matrix.map(m => m.category))];
+  const lookup = {};
+  for (const m of matrix) lookup[m.regime + "|" + m.category] = m;
+
+  let html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">';
+  html += '<tr><th style="text-align:left;padding:4px;color:#6b7280"></th>';
+  for (const cat of categories) html += `<th style="padding:4px;color:#6b7280;font-weight:600;min-width:60px">${esc(cat?.slice(0,10) || "?")}</th>`;
+  html += '</tr>';
+
+  for (const reg of regimes) {
+    html += `<tr><td style="padding:4px;color:#9ca3af;font-weight:600">${esc(reg)}</td>`;
+    for (const cat of categories) {
+      const cell = lookup[reg + "|" + cat];
+      if (cell) {
+        const wr = cell.winRate || 0;
+        const bg = wr >= 60 ? "#065f4620" : wr >= 45 ? "#78350f20" : "#7f1d1d20";
+        const color = wr >= 60 ? "#34d399" : wr >= 45 ? "#fbbf24" : "#f87171";
+        html += `<td style="padding:4px;text-align:center;background:${bg}"><span style="color:${color};font-weight:700">${wr}%</span><br><span style="color:#4b5563;font-size:9px">${cell.total}t</span></td>`;
+      } else {
+        html += '<td style="padding:4px;text-align:center;color:#374151">-</td>';
+      }
+    }
+    html += '</tr>';
+  }
+  html += '</table></div>';
+  el.innerHTML = html;
+}
+
+function renderAnomalies(data) {
+  const el = $("anomalyBlock");
+  if (!el) return;
+  const sevColors = { none: "#34d399", warning: "#fbbf24", critical: "#f87171" };
+  const sevColor = sevColors[data.severity] || "#6b7280";
+  let html = `<div class="kv"><span class="k">Status</span><span class="v" style="color:${sevColor};font-weight:700">${(data.severity || "none").toUpperCase()}</span></div>`;
+
+  if (data.recent) {
+    html += `<div class="kv"><span class="k">Recent (${data.recent.trades}t)</span><span class="v">${data.recent.winRate ?? "-"}% WR | Sharpe ${data.recent.sharpe ?? "-"}</span></div>`;
+  }
+  if (data.baseline) {
+    html += `<div class="kv"><span class="k">Baseline (${data.baseline.trades}t)</span><span class="v">${data.baseline.winRate ?? "-"}% WR | Sharpe ${data.baseline.sharpe ?? "-"}</span></div>`;
+  }
+
+  for (const a of (data.anomalies || [])) {
+    const ac = a.severity === "critical" ? "#f87171" : "#fbbf24";
+    html += `<div style="margin-top:6px;padding:6px 8px;background:${a.severity === "critical" ? "#7f1d1d15" : "#78350f15"};border-radius:6px;border-left:3px solid ${ac}"><div style="font-size:10px;color:${ac};font-weight:700">${esc(a.type.replace(/_/g, " ").toUpperCase())}</div><div style="font-size:10px;color:#9ca3af;margin-top:2px">${esc(a.detail)}</div></div>`;
+  }
+
+  if ((data.anomalies || []).length === 0) {
+    html += '<div style="margin-top:6px;font-size:11px;color:#34d399">All systems nominal</div>';
+  }
+
+  html += `<div style="margin-top:6px;font-size:9px;color:#4b5563">${esc(data.recommendation || "")}</div>`;
+  el.innerHTML = html;
+}
+
+function renderSlippage(data) {
+  const el = $("slippageBlock");
+  if (!el) return;
+  const o = data.overall || {};
+  if (!o.trades) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No slippage data yet</div>'; return; }
+
+  let html = `<div class="kv"><span class="k">Trades analyzed</span><span class="v">${o.trades}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg slippage</span><span class="v">${o.avg_abs_slippage ?? "-"}</span></div>`;
+  html += `<div class="kv"><span class="k">Max slippage</span><span class="v">${o.max_slippage ?? "-"}</span></div>`;
+  html += `<div class="kv"><span class="k">Worse/Better/Exact</span><span class="v">${o.worse_fills || 0}/${o.better_fills || 0}/${o.exact_fills || 0}</span></div>`;
+
+  if (data.bySize?.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:8px;margin-bottom:4px">BY SIZE</div>';
+    for (const s of data.bySize) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(s.size_bucket)}</span><span class="v" style="font-size:10px">${s.avg_slippage ?? "-"} (${s.trades}t)</span></div>`;
+    }
+  }
+
+  el.innerHTML = html;
 }
 
 connectWs();
