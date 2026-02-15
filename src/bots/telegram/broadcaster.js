@@ -17,7 +17,10 @@ export async function broadcastSignal(tick) {
   const bot = getTelegramBot();
   if (!bot) return;
 
-  const message = formatSignalMessage(tick);
+  // Settlement notifications use a different format
+  const message = tick.signal === "SETTLED"
+    ? formatSettlementMessage(tick)
+    : formatSignalMessage(tick);
 
   // Private channel (real-time, paid subscribers)
   const privateChannelId = process.env.TELEGRAM_PRIVATE_CHANNEL_ID;
@@ -29,10 +32,14 @@ export async function broadcastSignal(tick) {
     }
   }
 
-  // Public channel (delayed, free)
+  // Public channel (delayed for signals, immediate for settlements)
   const publicChannelId = process.env.TELEGRAM_PUBLIC_CHANNEL_ID;
   if (publicChannelId) {
-    pendingDelayed.push({ message, channelId: publicChannelId, sendAt: Date.now() + DELAY_FREE_MS });
+    if (tick.signal === "SETTLED") {
+      try { await bot.sendMessage(publicChannelId, message, { parse_mode: "HTML" }); } catch { /* ignore */ }
+    } else {
+      pendingDelayed.push({ message, channelId: publicChannelId, sendAt: Date.now() + DELAY_FREE_MS });
+    }
   }
 }
 
@@ -72,6 +79,12 @@ function formatSignalMessage(tick) {
     `Strength: ${tick.rec.strength} | Phase: ${tick.rec.phase}\n` +
     `Category: ${tick.category || "other"}`
   );
+}
+
+function formatSettlementMessage(tick) {
+  const msg = tick.settlementMsg || "Market settled";
+  const emoji = msg.startsWith("WIN") ? "✅" : "❌";
+  return `${emoji} <b>SETTLED</b> — ${escapeHtml((tick.question || "").slice(0, 60))}\n${escapeHtml(msg)}`;
 }
 
 function escapeHtml(text) {

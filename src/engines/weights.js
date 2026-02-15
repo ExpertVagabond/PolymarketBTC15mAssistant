@@ -8,12 +8,13 @@
  * Refreshes automatically every REFRESH_INTERVAL_MS.
  */
 
-import { computeDynamicWeights, getFeatureWinRates } from "../signals/history.js";
+import { computeDynamicWeights, getFeatureWinRates, getComboWinRates } from "../signals/history.js";
 
 const REFRESH_INTERVAL_MS = 10 * 60_000; // Recalculate every 10 minutes
 const MIN_SETTLED = 50; // Minimum settled outcomes before learning kicks in
 
 let cachedWeights = null;
+let cachedCombos = null; // combo (pair) multipliers
 let lastRefreshMs = 0;
 let refreshTimer = null;
 let modelVersion = 0;
@@ -84,10 +85,42 @@ function refresh() {
     } else {
       cachedWeights = null; // Not enough data, use defaults
     }
+
+    // Refresh combo multipliers
+    refreshCombos();
   } catch {
     cachedWeights = null; // DB error, use defaults
+    cachedCombos = null;
   }
   lastRefreshMs = Date.now();
+}
+
+/**
+ * Refresh combo (feature-pair) multipliers from history.
+ * Combos with win rate significantly above/below 50% get a boost/dampen.
+ */
+function refreshCombos() {
+  try {
+    const combos = getComboWinRates(10);
+    if (!combos || combos.length === 0) { cachedCombos = null; return; }
+
+    const map = {};
+    for (const c of combos) {
+      if (c.win_rate == null) continue;
+      // Convert win rate to multiplier: 50% → 1.0, 75% → 1.25, 25% → 0.75
+      const confidenceFactor = Math.min(1, c.total / 30);
+      const rawShift = ((c.win_rate / 100) - 0.5) * confidenceFactor;
+      map[c.combo] = {
+        multiplier: 1.0 + Math.max(-0.3, Math.min(0.3, rawShift)),
+        winRate: c.win_rate,
+        total: c.total,
+        wins: c.wins
+      };
+    }
+    cachedCombos = Object.keys(map).length > 0 ? map : null;
+  } catch {
+    cachedCombos = null;
+  }
 }
 
 /**
@@ -135,6 +168,22 @@ export function getWeight(feature, value) {
 }
 
 /**
+ * Get the combo (feature-pair) multiplier for a given VWAP+RSI combo.
+ *
+ * @param {string} vwapPosition - e.g. "ABOVE"
+ * @param {string} rsiZone - e.g. "OVERBOUGHT"
+ * @returns {number} Multiplier (0.7 - 1.3, default 1.0)
+ */
+export function getComboWeight(vwapPosition, rsiZone) {
+  if (Date.now() - lastRefreshMs > REFRESH_INTERVAL_MS) {
+    refresh();
+  }
+  if (!cachedCombos || !vwapPosition || !rsiZone) return 1.0;
+  const key = vwapPosition + "+" + rsiZone;
+  return cachedCombos[key]?.multiplier ?? 1.0;
+}
+
+/**
  * Get all current weights (for dashboard/debugging).
  */
 export function getAllWeights() {
@@ -145,6 +194,7 @@ export function getAllWeights() {
     source: cachedWeights ? "learned" : "default",
     modelVersion,
     weights: cachedWeights || DEFAULT_WEIGHTS,
+    combos: cachedCombos || {},
     lastRefresh: lastRefreshMs,
     nextRefresh: lastRefreshMs + REFRESH_INTERVAL_MS,
     recentChanges: weightHistory.slice(-10)

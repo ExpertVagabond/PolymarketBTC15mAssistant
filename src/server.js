@@ -19,6 +19,7 @@ import { startWeightRefresh, stopWeightRefresh, getAllWeights } from "./engines/
 import { fetchClobPrice } from "./data/polymarket.js";
 import { sleep } from "./utils.js";
 import { initPortfolio, openPosition, updatePrices, checkSettlements } from "./portfolio/tracker.js";
+import { dispatchWebhooks, dispatchEmailAlerts } from "./notifications/dispatch.js";
 
 async function main() {
   applyGlobalProxyFromEnv();
@@ -52,6 +53,10 @@ async function main() {
     tgBroadcast(tick).catch((err) => console.error("[broadcast] Telegram error:", err.message));
     // Broadcast to Discord
     dcBroadcast(tick).catch((err) => console.error("[broadcast] Discord error:", err.message));
+    // Dispatch to custom webhooks
+    dispatchWebhooks(tick).catch((err) => console.error("[broadcast] Webhook error:", err.message));
+    // Email alerts
+    dispatchEmailAlerts(tick).catch((err) => console.error("[broadcast] Email error:", err.message));
   });
 
   orchestrator.on("scanner:ready", ({ marketCount }) => {

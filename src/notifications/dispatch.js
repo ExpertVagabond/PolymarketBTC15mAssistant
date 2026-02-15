@@ -1,0 +1,226 @@
+/**
+ * Notification dispatch: webhooks + email alerts.
+ *
+ * Sends signal notifications to:
+ * 1. Custom webhook URLs (user-registered endpoints)
+ * 2. Email alerts (via Resend, for subscribers with email_alerts enabled)
+ *
+ * All dispatches are fire-and-forget with error logging.
+ */
+
+import { getDb } from "../subscribers/db.js";
+
+let stmts = null;
+
+function ensureTable() {
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webhooks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      url TEXT NOT NULL,
+      name TEXT DEFAULT 'default',
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      last_sent_at TEXT,
+      success_count INTEGER DEFAULT 0,
+      fail_count INTEGER DEFAULT 0,
+      last_error TEXT
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_prefs (
+      email TEXT PRIMARY KEY,
+      alerts_enabled INTEGER DEFAULT 0,
+      min_confidence INTEGER DEFAULT 60,
+      categories TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  stmts = {
+    addWebhook: db.prepare("INSERT INTO webhooks (email, url, name) VALUES (?, ?, ?)"),
+    listWebhooks: db.prepare("SELECT * FROM webhooks WHERE email = ? ORDER BY created_at DESC"),
+    activeWebhooks: db.prepare("SELECT * FROM webhooks WHERE active = 1"),
+    deleteWebhook: db.prepare("DELETE FROM webhooks WHERE id = ? AND email = ?"),
+    recordSuccess: db.prepare("UPDATE webhooks SET last_sent_at = datetime('now'), success_count = success_count + 1, last_error = NULL WHERE id = ?"),
+    recordFail: db.prepare("UPDATE webhooks SET fail_count = fail_count + 1, last_error = ? WHERE id = ?"),
+    deactivate: db.prepare("UPDATE webhooks SET active = 0 WHERE id = ?"),
+    getEmailPrefs: db.prepare("SELECT * FROM email_prefs WHERE email = ?"),
+    setEmailPrefs: db.prepare(`INSERT INTO email_prefs (email, alerts_enabled, min_confidence, categories) VALUES (?, ?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET alerts_enabled=excluded.alerts_enabled, min_confidence=excluded.min_confidence, categories=excluded.categories`),
+    activeEmailPrefs: db.prepare("SELECT * FROM email_prefs WHERE alerts_enabled = 1")
+  };
+}
+
+/**
+ * Add a webhook endpoint for a subscriber.
+ */
+export function addWebhook(email, url, name = "default") {
+  if (!stmts) ensureTable();
+  // Limit to 5 webhooks per email
+  const existing = stmts.listWebhooks.all(email);
+  if (existing.length >= 5) throw new Error("max_webhooks_reached");
+  stmts.addWebhook.run(email, url, name);
+}
+
+/**
+ * List webhooks for a subscriber.
+ */
+export function listWebhooks(email) {
+  if (!stmts) ensureTable();
+  return stmts.listWebhooks.all(email);
+}
+
+/**
+ * Delete a webhook by ID (must belong to the given email).
+ */
+export function deleteWebhook(id, email) {
+  if (!stmts) ensureTable();
+  const result = stmts.deleteWebhook.run(id, email);
+  return result.changes > 0;
+}
+
+/**
+ * Set email alert preferences.
+ */
+export function setEmailPrefs(email, { alertsEnabled = false, minConfidence = 60, categories = null } = {}) {
+  if (!stmts) ensureTable();
+  stmts.setEmailPrefs.run(email, alertsEnabled ? 1 : 0, minConfidence, categories ? JSON.stringify(categories) : null);
+}
+
+/**
+ * Get email alert preferences.
+ */
+export function getEmailPrefs(email) {
+  if (!stmts) ensureTable();
+  const row = stmts.getEmailPrefs.get(email);
+  if (!row) return null;
+  return { ...row, categories: row.categories ? JSON.parse(row.categories) : null };
+}
+
+/**
+ * Dispatch a signal to all active webhooks.
+ * Fire-and-forget; errors are logged but don't block.
+ */
+export async function dispatchWebhooks(tick) {
+  if (!stmts) ensureTable();
+  const webhooks = stmts.activeWebhooks.all();
+  if (webhooks.length === 0) return;
+
+  const payload = formatSignalPayload(tick);
+
+  for (const wh of webhooks) {
+    sendWebhook(wh, payload).catch(() => {});
+  }
+}
+
+async function sendWebhook(wh, payload) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(wh.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "PolySignal/1.0" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      stmts.recordSuccess.run(wh.id);
+    } else {
+      const errMsg = `HTTP ${res.status}`;
+      stmts.recordFail.run(errMsg, wh.id);
+      // Deactivate after 10 consecutive failures
+      if (wh.fail_count >= 9) {
+        stmts.deactivate.run(wh.id);
+        console.log(`[webhooks] Deactivated webhook ${wh.id} after 10 failures`);
+      }
+    }
+  } catch (err) {
+    stmts.recordFail.run(err.message, wh.id);
+    if (wh.fail_count >= 9) {
+      stmts.deactivate.run(wh.id);
+    }
+  }
+}
+
+/**
+ * Send email alerts to all subscribers who opted in.
+ */
+export async function dispatchEmailAlerts(tick, resendClient) {
+  if (!stmts) ensureTable();
+  if (!resendClient) return;
+
+  const prefs = stmts.activeEmailPrefs.all();
+  if (prefs.length === 0) return;
+
+  const confidence = tick.confidence ?? 0;
+  const category = (tick.category || "").toLowerCase();
+
+  for (const pref of prefs) {
+    // Check confidence threshold
+    if (confidence < (pref.min_confidence || 0)) continue;
+
+    // Check category filter
+    if (pref.categories) {
+      const cats = JSON.parse(pref.categories).map(c => c.toLowerCase());
+      if (cats.length > 0 && !cats.includes(category)) continue;
+    }
+
+    sendEmailAlert(pref.email, tick, resendClient).catch(err => {
+      console.error(`[email-alert] Failed for ${pref.email}:`, err.message);
+    });
+  }
+}
+
+async function sendEmailAlert(email, tick, resend) {
+  const side = tick.side === "UP" ? "BUY YES" : "BUY NO";
+  const edge = tick.edge != null ? (tick.edge * 100).toFixed(1) : "?";
+  const conf = tick.confidence ?? "?";
+  const question = tick.question || "Unknown market";
+
+  await resend.emails.send({
+    from: process.env.RESEND_FROM || "PolySignal <alerts@polysignal.io>",
+    to: email,
+    subject: `[PolySignal] ${side}: ${question.slice(0, 50)}`,
+    html: `
+      <div style="font-family:system-ui;max-width:500px;margin:0 auto;padding:20px">
+        <h2 style="color:#fff;background:#0b0b11;padding:14px 20px;border-radius:8px;margin:0 0 16px">${side}</h2>
+        <p style="font-size:15px;color:#333"><strong>${question}</strong></p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:6px 0;color:#666">Edge</td><td style="padding:6px 0;font-weight:600">+${edge}%</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Confidence</td><td style="padding:6px 0;font-weight:600">${conf}/100</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Category</td><td style="padding:6px 0">${tick.category || "-"}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Strength</td><td style="padding:6px 0">${tick.strength || "-"}</td></tr>
+        </table>
+        <p style="font-size:12px;color:#999;margin-top:20px">You're receiving this because you enabled email alerts on PolySignal.</p>
+      </div>
+    `
+  });
+}
+
+function formatSignalPayload(tick) {
+  return {
+    event: tick.signal === "SETTLED" ? "signal.settled" : "signal.enter",
+    timestamp: new Date().toISOString(),
+    data: {
+      question: tick.question,
+      category: tick.category,
+      side: tick.side,
+      signal: tick.signal,
+      strength: tick.strength,
+      edge: tick.edge,
+      confidence: tick.confidence,
+      confidenceTier: tick.confidenceTier,
+      modelUp: tick.modelUp,
+      priceUp: tick.priceUp,
+      priceDown: tick.priceDown,
+      kelly: tick.kelly,
+      settlementLeftMin: tick.settlementLeftMin,
+      settlementMsg: tick.settlementMsg
+    }
+  };
+}

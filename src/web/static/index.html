@@ -243,6 +243,31 @@
 
     @media (max-width: 800px) { .analytics-grid { grid-template-columns: 1fr; } .analytics-card.wide { grid-column: 1; } }
 
+    /* ── Simulator panel ── */
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px 28px; background: #0e0e16; border-bottom: 1px solid #1a1a24; align-items: flex-end; }
+    .sim-group { display: flex; flex-direction: column; gap: 4px; }
+    .sim-group label { font-size: 10px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sim-group input[type="range"] { width: 120px; accent-color: #3b82f6; }
+    .sim-range-val { font-size: 11px; color: #e5e7eb; font-weight: 600; min-width: 28px; text-align: center; }
+    .sim-group input[type="number"] { width: 70px; background: #14141e; border: 1px solid #1e1e2a; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #e5e7eb; font-family: inherit; }
+    .sim-group input[type="number"]:focus { border-color: #3b82f6; outline: none; }
+    .sim-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+    .sim-chip { background: #14141e; border: 1px solid #1e1e2a; border-radius: 4px; padding: 4px 10px; font-size: 11px; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .sim-chip:hover { border-color: #3b82f6; color: #93c5fd; }
+    .sim-chip.active { background: #3b82f618; border-color: #3b82f6; color: #60a5fa; }
+    .sim-run-btn { background: linear-gradient(135deg, #3b82f6, #8b5cf6); border: none; border-radius: 6px; padding: 8px 20px; font-size: 12px; font-weight: 700; color: #fff; cursor: pointer; font-family: inherit; transition: opacity 0.15s; white-space: nowrap; }
+    .sim-run-btn:hover { opacity: 0.85; }
+    .sim-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .sim-results { padding: 20px 28px; }
+    .sim-kpi-strip { display: flex; gap: 0; background: #12121a; border: 1px solid #1e1e2a; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .sim-kpi { flex: 1; padding: 14px 16px; text-align: center; border-right: 1px solid #1a1a24; }
+    .sim-kpi:last-child { border-right: none; }
+    .sim-kpi-label { font-size: 10px; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .sim-kpi-val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: #e5e7eb; }
+    .sim-kpi-val.green { color: #34d399; }
+    .sim-kpi-val.red { color: #f87171; }
+    .sim-empty { text-align: center; padding: 48px 20px; color: #374151; font-size: 13px; }
+
     /* ── Single-market mode (legacy fallback) ── */
     #singleMode { display: none; }
     #singleMode.visible { display: block; }
@@ -290,6 +315,7 @@
     <button class="tab-btn active" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="tab-btn" id="tabAnalytics" onclick="switchTab('analytics')">Analytics</button>
     <button class="tab-btn" id="tabPortfolio" onclick="switchTab('portfolio')">Portfolio</button>
+    <button class="tab-btn" id="tabSimulator" onclick="switchTab('simulator')">Simulator</button>
     <span class="plan-badge free" id="planBadge">FREE</span>
     <button class="notify-btn" id="notifyBtn" onclick="toggleNotifications()" title="Toggle alerts">Alerts: Off</button>
     <a href="/stats.html" class="header-link">Performance</a>
@@ -488,6 +514,51 @@
         <tbody id="recentTradesBody"></tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<!-- ═══════ SIMULATOR MODE ═══════ -->
+<div id="simulatorMode" style="display:none">
+
+  <!-- Filter controls -->
+  <div class="sim-controls">
+    <div class="sim-group">
+      <label>Min Confidence</label>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="range" id="simMinConf" min="0" max="100" value="0" oninput="$('simMinConfVal').textContent=this.value">
+        <span class="sim-range-val" id="simMinConfVal">0</span>
+      </div>
+    </div>
+    <div class="sim-group">
+      <label>Min Edge %</label>
+      <input type="number" id="simMinEdge" value="0" step="0.5" min="0" max="50" placeholder="0">
+    </div>
+    <div class="sim-group">
+      <label>Categories</label>
+      <div class="sim-chips" id="simCatChips"></div>
+    </div>
+    <div class="sim-group">
+      <label>Strength</label>
+      <div class="sim-chips">
+        <button class="sim-chip active" data-str="all" onclick="toggleSimStr(this)">All</button>
+        <button class="sim-chip" data-str="STRONG" onclick="toggleSimStr(this)">Strong</button>
+        <button class="sim-chip" data-str="GOOD" onclick="toggleSimStr(this)">Good</button>
+      </div>
+    </div>
+    <div class="sim-group">
+      <label>Side</label>
+      <div class="sim-chips">
+        <button class="sim-chip active" data-side="all" onclick="toggleSimSide(this)">Both</button>
+        <button class="sim-chip" data-side="UP" onclick="toggleSimSide(this)">YES</button>
+        <button class="sim-chip" data-side="DOWN" onclick="toggleSimSide(this)">NO</button>
+      </div>
+    </div>
+    <button class="sim-run-btn" id="simRunBtn" onclick="runSimulation()">Run Simulation</button>
+  </div>
+
+  <!-- Results -->
+  <div class="sim-results" id="simResults">
+    <div class="sim-empty">Configure filters above and click <strong>Run Simulation</strong> to backtest your strategy against historical signals.</div>
   </div>
 </div>
 

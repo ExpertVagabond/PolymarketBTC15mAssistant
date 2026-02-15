@@ -19,6 +19,7 @@
  */
 
 import { clamp } from "../utils.js";
+import { getComboWeight } from "./weights.js";
 
 /**
  * Compute confidence score for a signal tick.
@@ -166,6 +167,19 @@ export function computeConfidence(tick, opts = {}) {
       breakdown.regime = 0;
     }
     total += breakdown.regime;
+  }
+  maxPossible += 5;
+
+  // ── 9. Combo (feature-pair) bonus (0-5 points) ──
+  // Learned from historical VWAP+RSI combinations
+  const vwapPos = tick.indicators?.vwapPosition;
+  const rsiZone = tick.indicators?.rsiZone;
+  if (vwapPos && rsiZone) {
+    const comboMul = getComboWeight(vwapPos, rsiZone);
+    // Multiplier > 1.0 = historically winning combo, < 1.0 = historically losing
+    const comboPts = clamp((comboMul - 1.0) * 50, -5, 5);
+    breakdown.combo = Math.round(comboPts * 10) / 10;
+    total += comboPts;
   }
   maxPossible += 5;
 

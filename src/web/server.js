@@ -24,6 +24,8 @@ import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
 import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
+import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
+import { addWebhook, listWebhooks, deleteWebhook, setEmailPrefs, getEmailPrefs } from "../notifications/dispatch.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -382,6 +384,118 @@ export async function startWebServer(opts = {}) {
       signals: getSignalStats(),
       wsClients: getClientCount()
     };
+  });
+
+  /* ── API Key Auth (X-API-Key header) ── */
+
+  function requireApiKeyOrSession(req, reply, done) {
+    const apiKey = req.headers["x-api-key"];
+    if (apiKey) {
+      const result = verifyKey(apiKey);
+      if (result) {
+        req.apiKeyUser = result;
+        done();
+        return;
+      }
+      reply.code(401).send({ error: "invalid_api_key" });
+      return;
+    }
+    // Fall back to session auth
+    const cookieToken = parseCookie(req.headers.cookie, "session");
+    const session = cookieToken ? verifySession(cookieToken) : null;
+    if (!session) {
+      reply.code(401).send({ error: "auth_required", hint: "Provide X-API-Key header or session cookie" });
+      return;
+    }
+    req.sessionUser = session;
+    done();
+  }
+
+  /* ── API Key Management Routes ── */
+
+  app.post("/api/keys/generate", { preHandler: requireAuth }, async (req) => {
+    const name = req.body?.name || "default";
+    const email = req.sessionUser?.email || req.body?.email;
+    if (!email) return { error: "no_email" };
+    try {
+      const result = generateKey(email, name);
+      return { ok: true, ...result };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  app.get("/api/keys", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return listKeys(email);
+  });
+
+  app.delete("/api/keys/:id", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    const ok = revokeKey(Number(req.params.id), email);
+    return { ok };
+  });
+
+  /* ── Webhook Management Routes ── */
+
+  app.post("/api/webhooks", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    const { url, name } = req.body || {};
+    if (!email) return { error: "no_email" };
+    if (!url || !url.startsWith("https://")) return { error: "invalid_url", hint: "URL must start with https://" };
+    try {
+      addWebhook(email, url, name || "default");
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  app.get("/api/webhooks", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return listWebhooks(email);
+  });
+
+  app.delete("/api/webhooks/:id", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    const ok = deleteWebhook(Number(req.params.id), email);
+    return { ok };
+  });
+
+  /* ── Email Alert Preferences ── */
+
+  app.get("/api/email-prefs", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getEmailPrefs(email) || { alerts_enabled: 0, min_confidence: 60, categories: null };
+  });
+
+  app.post("/api/email-prefs", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    const { alertsEnabled, minConfidence, categories } = req.body || {};
+    setEmailPrefs(email, { alertsEnabled, minConfidence, categories });
+    return { ok: true };
+  });
+
+  /* ── Programmatic API (API key or session auth) ── */
+
+  app.get("/api/v1/signals", { preHandler: requireApiKeyOrSession }, async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getRecentSignals(limit);
+  });
+
+  app.get("/api/v1/stats", { preHandler: requireApiKeyOrSession }, async () => {
+    return getSignalStats();
+  });
+
+  app.get("/api/v1/scanner", { preHandler: requireApiKeyOrSession }, async () => {
+    if (!orchestrator) return { error: "no_scanner" };
+    return { signals: orchestrator.getActiveSignals(), stats: orchestrator.getStats() };
   });
 
   /* ── Start poller (single-market mode when no orchestrator) ── */

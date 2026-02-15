@@ -76,21 +76,30 @@ let portfolioLoaded = false;
 let portfolioRefreshTimer = null;
 let analyticsCharts = {};
 
+let simulatorLoaded = false;
+
 function switchTab(tab) {
   // Check feature gates
   if (tab === "analytics" && !gates().analytics) { showUpgradeModal(); return; }
   if (tab === "portfolio" && !gates().portfolio) { showUpgradeModal(); return; }
+  if (tab === "simulator" && !gates().simulator) { showUpgradeModal(); return; }
 
   activeTab = tab;
   $("tabDashboard").classList.toggle("active", tab === "dashboard");
   $("tabAnalytics").classList.toggle("active", tab === "analytics");
   $("tabPortfolio").classList.toggle("active", tab === "portfolio");
+  $("tabSimulator").classList.toggle("active", tab === "simulator");
   $("scannerMode").style.display = tab === "dashboard" ? "block" : "none";
   $("analyticsMode").style.display = tab === "analytics" ? "block" : "none";
   $("portfolioMode").style.display = tab === "portfolio" ? "block" : "none";
+  $("simulatorMode").style.display = tab === "simulator" ? "block" : "none";
 
   if (tab === "analytics" && !analyticsLoaded) {
     loadAnalytics();
+  }
+  if (tab === "simulator" && !simulatorLoaded) {
+    initSimulatorCategories();
+    simulatorLoaded = true;
   }
   if (tab === "portfolio") {
     loadPortfolio();
@@ -1052,3 +1061,159 @@ async function renderSettledTable() {
     }).join("");
   } catch { /* ignore */ }
 }
+
+/* ═══ Strategy Simulator ═══ */
+
+let simEquityChart = null;
+let simSelectedCats = []; // empty = all
+let simSelectedStr = "all";
+let simSelectedSide = "all";
+
+async function initSimulatorCategories() {
+  try {
+    const stats = await fetch("/api/signals/stats").then(r => r.json());
+    const cats = (stats.byCategory || []).map(c => c.category).filter(Boolean).sort();
+    const container = $("simCatChips");
+    container.innerHTML = '<button class="sim-chip active" data-cat="all" onclick="toggleSimCat(this)">All</button>'
+      + cats.map(c => `<button class="sim-chip" data-cat="${esc(c)}" onclick="toggleSimCat(this)">${esc(c)}</button>`).join("");
+  } catch { /* ignore */ }
+}
+
+function toggleSimCat(btn) {
+  const cat = btn.dataset.cat;
+  if (cat === "all") {
+    simSelectedCats = [];
+    $("simCatChips").querySelectorAll(".sim-chip").forEach(b => b.classList.toggle("active", b.dataset.cat === "all"));
+  } else {
+    $("simCatChips").querySelector('[data-cat="all"]').classList.remove("active");
+    btn.classList.toggle("active");
+    simSelectedCats = [...$("simCatChips").querySelectorAll(".sim-chip.active")].map(b => b.dataset.cat).filter(c => c !== "all");
+    if (simSelectedCats.length === 0) {
+      $("simCatChips").querySelector('[data-cat="all"]').classList.add("active");
+    }
+  }
+}
+
+function toggleSimStr(btn) {
+  const str = btn.dataset.str;
+  btn.parentElement.querySelectorAll(".sim-chip").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  simSelectedStr = str;
+}
+
+function toggleSimSide(btn) {
+  const side = btn.dataset.side;
+  btn.parentElement.querySelectorAll(".sim-chip").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  simSelectedSide = side;
+}
+
+async function runSimulation() {
+  const btn = $("simRunBtn");
+  btn.disabled = true;
+  btn.textContent = "Running...";
+
+  try {
+    const params = new URLSearchParams();
+    const minConf = Number($("simMinConf").value);
+    if (minConf > 0) params.set("minConfidence", minConf);
+    const minEdge = Number($("simMinEdge").value);
+    if (minEdge > 0) params.set("minEdge", minEdge / 100);
+    if (simSelectedCats.length > 0) params.set("categories", simSelectedCats.join(","));
+    if (simSelectedStr !== "all") params.set("strengths", simSelectedStr);
+    if (simSelectedSide !== "all") params.set("sides", simSelectedSide);
+
+    const res = await fetch("/api/simulate?" + params.toString());
+    const data = await res.json();
+    renderSimResults(data);
+  } catch (err) {
+    $("simResults").innerHTML = `<div class="sim-empty" style="color:#f87171">Simulation failed: ${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run Simulation";
+  }
+}
+
+function renderSimResults(data) {
+  if (data.total === 0) {
+    $("simResults").innerHTML = `<div class="sim-empty">${data.message || "No settled signals match your filters."}</div>`;
+    return;
+  }
+
+  const winRate = data.winRate != null ? data.winRate + "%" : "-";
+  const totalPnl = data.totalPnl != null ? (data.totalPnl >= 0 ? "+" : "") + data.totalPnl.toFixed(1) + "%" : "-";
+  const avgPnl = data.avgPnl != null ? (data.avgPnl >= 0 ? "+" : "") + data.avgPnl.toFixed(2) + "%" : "-";
+  const sharpe = data.sharpe != null ? data.sharpe.toFixed(2) : "-";
+  const maxDD = data.maxDrawdown != null ? data.maxDrawdown.toFixed(1) + "%" : "-";
+
+  const kpiHtml = `
+    <div class="sim-kpi-strip">
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Signals</div>
+        <div class="sim-kpi-val">${data.total}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Win Rate</div>
+        <div class="sim-kpi-val ${parseFloat(data.winRate) >= 50 ? 'green' : 'red'}">${winRate}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Total P&L</div>
+        <div class="sim-kpi-val ${data.totalPnl >= 0 ? 'green' : 'red'}">${totalPnl}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Avg P&L</div>
+        <div class="sim-kpi-val ${data.avgPnl >= 0 ? 'green' : 'red'}">${avgPnl}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Sharpe</div>
+        <div class="sim-kpi-val">${sharpe}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">Max DD</div>
+        <div class="sim-kpi-val red">${maxDD}</div>
+      </div>
+      <div class="sim-kpi">
+        <div class="sim-kpi-label">W / L</div>
+        <div class="sim-kpi-val">${data.wins} / ${data.losses}</div>
+      </div>
+    </div>`;
+
+  // Equity curve
+  const curve = data.equityCurve || [];
+  const chartHtml = curve.length > 0 ? `
+    <div class="analytics-card wide" style="margin-bottom:0">
+      <div class="analytics-title">Simulated Equity Curve</div>
+      <div class="analytics-chart"><canvas id="simEquityCanvas"></canvas></div>
+    </div>` : "";
+
+  $("simResults").innerHTML = kpiHtml + chartHtml;
+
+  if (curve.length > 0) {
+    if (simEquityChart) simEquityChart.destroy();
+    const labels = curve.map(p => {
+      const d = new Date(p.date);
+      return (d.getMonth() + 1) + "/" + d.getDate();
+    });
+    const values = curve.map(p => p.cumPnl);
+
+    simEquityChart = new Chart($("simEquityCanvas"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Cumulative P&L %",
+          data: values,
+          borderColor: values[values.length - 1] >= 0 ? CHART_COLORS.green : CHART_COLORS.red,
+          backgroundColor: values[values.length - 1] >= 0 ? CHART_COLORS.greenBg : CHART_COLORS.redBg,
+          fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2
+        }]
+      },
+      options: CHART_DEFAULTS
+    });
+  }
+}
+
+window.toggleSimCat = toggleSimCat;
+window.toggleSimStr = toggleSimStr;
+window.toggleSimSide = toggleSimSide;
+window.runSimulation = runSimulation;

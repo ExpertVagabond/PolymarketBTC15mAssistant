@@ -17,7 +17,10 @@ export async function broadcastSignal(tick) {
   const client = getDiscordClient();
   if (!client) return;
 
-  const embed = buildSignalEmbed(tick);
+  // Settlement notifications use a different embed
+  const embed = tick.signal === "SETTLED"
+    ? buildSettlementEmbed(tick)
+    : buildSignalEmbed(tick);
 
   // Premium channel (real-time)
   const premiumChannelId = process.env.DISCORD_PREMIUM_CHANNEL_ID;
@@ -30,10 +33,17 @@ export async function broadcastSignal(tick) {
     }
   }
 
-  // Free channel (delayed)
+  // Free channel (delayed for signals, immediate for settlements)
   const freeChannelId = process.env.DISCORD_FREE_CHANNEL_ID;
   if (freeChannelId) {
-    pendingDelayed.push({ embed: buildFreeEmbed(tick), channelId: freeChannelId, sendAt: Date.now() + DELAY_FREE_MS });
+    if (tick.signal === "SETTLED") {
+      try {
+        const channel = await client.channels.fetch(freeChannelId);
+        if (channel) await channel.send({ embeds: [embed] });
+      } catch { /* ignore */ }
+    } else {
+      pendingDelayed.push({ embed: buildFreeEmbed(tick), channelId: freeChannelId, sendAt: Date.now() + DELAY_FREE_MS });
+    }
   }
 }
 
@@ -83,5 +93,19 @@ function buildFreeEmbed(tick) {
     .setTitle(`Signal: BUY ${side} — ${tick.question?.slice(0, 40) || "Unknown"}`)
     .setColor(0x888888)
     .setDescription(`Strength: ${tick.rec.strength} | Category: ${tick.category}\n\n_Subscribe for real-time signals with full detail._`)
+    .setTimestamp();
+}
+
+function buildSettlementEmbed(tick) {
+  const msg = tick.settlementMsg || "Market settled";
+  const isWin = msg.startsWith("WIN");
+
+  return new EmbedBuilder()
+    .setTitle(`${isWin ? "WIN" : "LOSS"} — ${(tick.question || "").slice(0, 50)}`)
+    .setColor(isWin ? 0x34d399 : 0xf87171)
+    .setDescription(msg)
+    .addFields(
+      { name: "Category", value: tick.category || "other", inline: true }
+    )
     .setTimestamp();
 }
