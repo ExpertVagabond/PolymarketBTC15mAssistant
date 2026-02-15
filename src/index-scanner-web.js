@@ -9,6 +9,9 @@
 
 import { createOrchestrator } from "./scanner/orchestrator.js";
 import { startWebServer } from "./web/server.js";
+import { stopSettlementMonitor } from "./trading/settlement-monitor.js";
+import { broadcastTradeEvent } from "./web/ws-handler.js";
+import { closeDb } from "./subscribers/db.js";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
 
 applyGlobalProxyFromEnv();
@@ -22,3 +25,23 @@ const app = await startWebServer({ orchestrator });
 await orchestrator.start();
 
 console.log("[index-scanner-web] Scanner + Web + Trading pipeline running");
+
+// Graceful shutdown
+let shutdownCalled = false;
+const shutdown = async (signal) => {
+  if (shutdownCalled) return;
+  shutdownCalled = true;
+  console.log(`\n[shutdown] ${signal} received — shutting down gracefully...`);
+
+  try { broadcastTradeEvent("SHUTDOWN", { reason: signal }); } catch {}
+  orchestrator.stop();
+  stopSettlementMonitor();
+  try { await app.close(); } catch {}
+  try { closeDb(); } catch {}
+
+  console.log("[shutdown] Complete");
+  process.exit(0);
+};
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

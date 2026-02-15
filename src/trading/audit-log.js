@@ -150,3 +150,37 @@ export function reconcilePositions() {
 
   return { openCount: results.length, positions: results, stale: results.filter(r => r.warning).length };
 }
+
+/**
+ * Auto-repair stale positions: cancel executions older than maxAgeHours with no audit events.
+ * Returns count of auto-repaired positions.
+ */
+export function autoRepairStalePositions(maxAgeHours = 72) {
+  ensureTable();
+  const db = getDb();
+
+  const staleExecs = db.prepare(`
+    SELECT e.id, e.market_id, e.side, e.amount, e.opened_at
+    FROM trade_executions e
+    WHERE e.status = 'open'
+      AND datetime(e.opened_at, '+${Math.floor(maxAgeHours)} hours') < datetime('now')
+  `).all();
+
+  let repaired = 0;
+  for (const exec of staleExecs) {
+    db.prepare(
+      "UPDATE trade_executions SET status = 'cancelled', close_reason = 'auto_repair_stale', closed_at = datetime('now') WHERE id = ?"
+    ).run(exec.id);
+
+    logAuditEvent("POSITION_AUTO_REPAIRED", {
+      executionId: exec.id,
+      marketId: exec.market_id,
+      side: exec.side,
+      amount: exec.amount,
+      reason: `stale_${Math.round((Date.now() - new Date(exec.opened_at).getTime()) / 3600000)}h`
+    });
+    repaired++;
+  }
+
+  return { repaired, maxAgeHours };
+}

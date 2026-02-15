@@ -162,7 +162,9 @@ const ENDPOINTS = {
   scannerEndpoints: [
     { method: "GET", path: "/api/scanner/state", desc: "All tracked markets with current prices and signals", tryable: true },
     { method: "GET", path: "/api/scanner/signals", desc: "Active trading signals only", tryable: true },
-    { method: "GET", path: "/api/scanner/stats", desc: "Scanner statistics (tracked, categories, signal count)", tryable: true }
+    { method: "GET", path: "/api/scanner/stats", desc: "Scanner statistics (tracked, categories, signal count)", tryable: true },
+    { method: "GET", path: "/api/scanner/health", desc: "Per-market health: error counts, success rate, consecutive failures", tryable: true },
+    { method: "GET", path: "/api/scanner/rotation?limit=50", desc: "Market rotation log: recently added/removed markets", tryable: true }
   ],
   signalEndpoints: [
     { method: "GET", path: "/api/signals/recent?limit=10", desc: "Recent signals. Supports cursor pagination: add &before=ID to paginate", tryable: true },
@@ -277,7 +279,8 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/reconcile", desc: "Position reconciliation — detect stale/orphaned positions (auth required)" },
     { method: "GET", path: "/api/trading/pnl", desc: "Real-time unrealized P&L for all open positions", tryable: true },
     { method: "GET", path: "/api/trading/config", desc: "Current trading config values with metadata", tryable: true },
-    { method: "POST", path: "/api/trading/config", desc: "Update trading config: { max_bet_usd, daily_loss_limit_usd, ... } (auth required)" }
+    { method: "POST", path: "/api/trading/config", desc: "Update trading config: { max_bet_usd, daily_loss_limit_usd, ... } (auth required)" },
+    { method: "GET", path: "/api/trading/analytics", desc: "Trade performance: win rate, P&L by category/day, edge accuracy, close reasons", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

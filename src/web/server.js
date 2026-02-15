@@ -50,7 +50,7 @@ import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecution
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
-import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions } from "../trading/audit-log.js";
+import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions, autoRepairStalePositions } from "../trading/audit-log.js";
 import { getWalletBalance } from "../trading/wallet.js";
 import { getRealtimePnl } from "../trading/pnl-tracker.js";
 import { getTradingConfig, getTradingConfigDetailed, updateTradingConfig } from "../trading/trading-config.js";
@@ -820,6 +820,11 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/reconcile", { preHandler: requireAuth }, async () => {
     return reconcilePositions();
+  });
+
+  app.post("/api/trading/reconcile/repair", { preHandler: requireAuth }, async (req) => {
+    const maxAge = Math.min(Math.max(Number(req.body?.maxAgeHours) || 72, 24), 720);
+    return autoRepairStalePositions(maxAge);
   });
 
   app.get("/api/trading/config", async () => {

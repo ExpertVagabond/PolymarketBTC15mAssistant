@@ -341,7 +341,8 @@ export async function dispatchTradeEvent(eventType, data = {}) {
 // Trade events that trigger notifications
 const NOTIFY_EVENTS = new Set([
   "POSITION_OPENED", "POSITION_CLOSED", "ORDER_FILLED", "ORDER_FILL_FAILED",
-  "ORDER_REJECTED", "CIRCUIT_BREAKER", "BOT_STATE_CHANGE"
+  "ORDER_REJECTED", "CIRCUIT_BREAKER", "BOT_STATE_CHANGE",
+  "CLOB_UNREACHABLE", "RISK_BLOCKED", "ORDER_FILL_ERROR", "CONFIG_CHANGE"
 ]);
 
 // Map audit event types to webhook event names
@@ -354,7 +355,10 @@ const EVENT_MAP = {
   "ORDER_PARTIAL_FILL": "trade.partial_fill",
   "CIRCUIT_BREAKER": "risk.circuit_breaker",
   "BOT_STATE_CHANGE": "bot.state_change",
-  "RISK_BLOCKED": "risk.blocked"
+  "RISK_BLOCKED": "risk.blocked",
+  "CLOB_UNREACHABLE": "risk.clob_unreachable",
+  "ORDER_FILL_ERROR": "trade.fill_error",
+  "CONFIG_CHANGE": "config.changed"
 };
 
 /**

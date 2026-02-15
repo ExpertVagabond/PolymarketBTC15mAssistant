@@ -8,7 +8,7 @@
 
 import { recordTradeClose } from "./risk-manager.js";
 import { placeSellOrderWithRetry } from "./clob-orders.js";
-import { closeExecution } from "./execution-log.js";
+import { closeExecution, getOpenExecutions } from "./execution-log.js";
 import { isMonitorActive, checkDrainComplete } from "./bot-control.js";
 import { logAuditEvent } from "./audit-log.js";
 import { getConfigValue } from "./trading-config.js";
@@ -235,10 +235,50 @@ async function checkOpenTrades() {
  */
 export function startSettlementMonitor() {
   if (monitorTimer) return;
-  console.log(`[settlement] Monitor started (TP: +${getConfigValue("take_profit_pct")}%, SL: ${getConfigValue("stop_loss_pct")}%, trail: ${getConfigValue("trailing_stop_pct")}%, maxHold: ${getConfigValue("max_hold_hours")}h)`);
+
+  // Rehydrate open positions from DB on startup
+  rehydrateFromDb();
+
+  console.log(`[settlement] Monitor started (TP: +${getConfigValue("take_profit_pct")}%, SL: ${getConfigValue("stop_loss_pct")}%, trail: ${getConfigValue("trailing_stop_pct")}%, maxHold: ${getConfigValue("max_hold_hours")}h, rehydrated: ${openTrades.size})`);
   monitorTimer = setInterval(checkOpenTrades, CHECK_INTERVAL_MS);
   // Run initial check after 10s to let scanner warm up
   setTimeout(checkOpenTrades, 10_000);
+}
+
+/**
+ * Rehydrate open trades from the execution-log DB.
+ * Called on startup to recover positions from a previous process.
+ */
+function rehydrateFromDb() {
+  try {
+    const openExecs = getOpenExecutions();
+    let rehydrated = 0;
+    for (const exec of openExecs) {
+      const key = exec.signal_id || exec.id;
+      if (openTrades.has(key)) continue; // already tracked
+
+      const openedAt = exec.opened_at ? new Date(exec.opened_at + "Z").getTime() : Date.now();
+      openTrades.set(key, {
+        signalId: key,
+        marketId: exec.market_id,
+        tokenId: exec.token_id || "",
+        side: exec.side,
+        entryPrice: exec.entry_price || exec.fill_price || 0.5,
+        betSize: exec.amount,
+        dryRun: !!exec.dry_run,
+        executionId: exec.id,
+        openedAt,
+        highestPrice: exec.entry_price || exec.fill_price || 0.5,
+        breakevenActivated: false
+      });
+      rehydrated++;
+    }
+    if (rehydrated > 0) {
+      logAuditEvent("POSITIONS_REHYDRATED", { count: rehydrated, total: openTrades.size });
+    }
+  } catch {
+    // Tables may not exist on first run
+  }
 }
 
 /**

@@ -7,9 +7,9 @@
 import { CONFIG } from "../config.js";
 import { buildClobHeaders, isTradingConfigured, getWallet } from "./clob-auth.js";
 import { logAuditEvent } from "./audit-log.js";
+import { getConfigValue } from "./trading-config.js";
 
 const CLOB_BASE = CONFIG.clobBaseUrl;
-const MIN_BALANCE = Number(process.env.MIN_BALANCE_USD) || 1;
 
 let cachedBalance = null;
 let cachedAt = 0;
@@ -113,9 +113,10 @@ export async function checkBalance(requiredAmount) {
 
   const available = wallet.balance - (wallet.locked || 0);
 
-  if (available < MIN_BALANCE) {
-    logAuditEvent("CIRCUIT_BREAKER", { detail: `low_balance: $${available.toFixed(2)} < min $${MIN_BALANCE}` });
-    return { ok: false, balance: available, reason: "below_minimum", minBalance: MIN_BALANCE };
+  const minBalance = getConfigValue("min_balance_usd");
+  if (available < minBalance) {
+    logAuditEvent("CIRCUIT_BREAKER", { detail: `low_balance: $${available.toFixed(2)} < min $${minBalance}` });
+    return { ok: false, balance: available, reason: "below_minimum", minBalance };
   }
 
   if (available < requiredAmount) {
