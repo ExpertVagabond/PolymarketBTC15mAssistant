@@ -42,13 +42,21 @@ function ensureTable() {
     CREATE INDEX IF NOT EXISTS idx_trade_exec_opened ON trade_executions(opened_at);
   `);
 
+  // Add decision context columns (safe: ALTER TABLE IF NOT EXISTS pattern)
+  const cols = db.prepare("PRAGMA table_info(trade_executions)").all().map(c => c.name);
+  if (!cols.includes("quality")) db.exec("ALTER TABLE trade_executions ADD COLUMN quality INTEGER");
+  if (!cols.includes("regime")) db.exec("ALTER TABLE trade_executions ADD COLUMN regime TEXT");
+  if (!cols.includes("streak_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN streak_mult REAL");
+  if (!cols.includes("hour_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN hour_mult REAL");
+  if (!cols.includes("sizing_method")) db.exec("ALTER TABLE trade_executions ADD COLUMN sizing_method TEXT");
+
   stmts = {
     insert: db.prepare(`
       INSERT INTO trade_executions (
         signal_id, market_id, token_id, question, category, side, strength,
         amount, entry_price, fill_price, status, dry_run, order_id, edge,
-        confidence, liquidity_check, error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        confidence, liquidity_check, error, quality, regime, streak_mult, hour_mult, sizing_method
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     close: db.prepare(`
       UPDATE trade_executions
@@ -89,7 +97,8 @@ function ensureTable() {
 export function logExecution({
   signalId, marketId, tokenId, question, category, side, strength,
   amount, entryPrice, fillPrice, status = "open", dryRun = true,
-  orderId, edge, confidence, liquidityCheck, error
+  orderId, edge, confidence, liquidityCheck, error,
+  quality, regime, streakMult, hourMult, sizingMethod
 }) {
   ensureTable();
   const info = stmts.insert.run(
@@ -98,7 +107,8 @@ export function logExecution({
     fillPrice || null, status, dryRun ? 1 : 0, orderId || null,
     edge || null, confidence || null,
     liquidityCheck ? JSON.stringify(liquidityCheck) : null,
-    error || null
+    error || null,
+    quality ?? null, regime || null, streakMult ?? null, hourMult ?? null, sizingMethod || null
   );
   return info.lastInsertRowid;
 }
@@ -301,6 +311,55 @@ export function getHourWinRate(hour) {
 }
 
 /**
+ * Get quality score distribution from stored quality column.
+ */
+export function getQualityDistribution() {
+  ensureTable();
+  const db = getDb();
+  const dist = db.prepare(`
+    SELECT
+      CASE
+        WHEN quality < 30 THEN '0-29'
+        WHEN quality < 50 THEN '30-49'
+        WHEN quality < 70 THEN '50-69'
+        WHEN quality < 90 THEN '70-89'
+        ELSE '90-100'
+      END as bucket,
+      COUNT(*) as count,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses
+    FROM trade_executions
+    WHERE quality IS NOT NULL
+    GROUP BY bucket
+    ORDER BY bucket
+  `).all();
+
+  const total = db.prepare("SELECT COUNT(*) as c FROM trade_executions").get().c;
+  const withQuality = db.prepare("SELECT COUNT(*) as c FROM trade_executions WHERE quality IS NOT NULL").get().c;
+  const avgQuality = db.prepare("SELECT ROUND(AVG(quality), 1) as avg FROM trade_executions WHERE quality IS NOT NULL").get()?.avg;
+
+  // Quality → win rate correlation
+  const qualityWinCorr = db.prepare(`
+    SELECT
+      ROUND(AVG(CASE WHEN quality >= 70 THEN
+        CASE WHEN pnl_usd > 0 THEN 1.0 ELSE 0.0 END
+      END) * 100, 1) as high_quality_win_rate,
+      ROUND(AVG(CASE WHEN quality < 50 THEN
+        CASE WHEN pnl_usd > 0 THEN 1.0 ELSE 0.0 END
+      END) * 100, 1) as low_quality_win_rate
+    FROM trade_executions
+    WHERE quality IS NOT NULL AND status = 'closed' AND pnl_usd IS NOT NULL
+  `).get();
+
+  return {
+    total, withQuality, avgQuality,
+    distribution: dist,
+    correlation: qualityWinCorr
+  };
+}
+
+/**
  * Get detailed trade performance analytics.
  */
 export function getTradeAnalytics() {
@@ -388,12 +447,131 @@ export function getTradeAnalytics() {
     WHERE status = 'closed' AND edge IS NOT NULL AND pnl_pct IS NOT NULL
   `).get();
 
+  // By regime (from decision context)
+  const byRegime = db.prepare(`
+    SELECT
+      COALESCE(regime, 'unknown') as regime,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl
+    FROM trade_executions WHERE status = 'closed'
+    GROUP BY regime
+    ORDER BY trades DESC
+  `).all();
+
+  // By sizing method
+  const bySizingMethod = db.prepare(`
+    SELECT
+      COALESCE(sizing_method, 'unknown') as method,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(amount), 2) as avg_size
+    FROM trade_executions WHERE status = 'closed'
+    GROUP BY sizing_method
+    ORDER BY trades DESC
+  `).all();
+
   return {
     overall,
     byCategory,
     byDay,
     avgHoldMinutes: holdTime?.avg_hold_minutes || null,
     byCloseReason,
-    edgeAccuracy
+    edgeAccuracy,
+    byRegime,
+    bySizingMethod
   };
+}
+
+/**
+ * Export trade executions with full decision context.
+ * @param {{ days?: number, status?: string, limit?: number }} opts
+ * @returns {object[]}
+ */
+export function exportExecutions({ days = 30, status, limit = 1000 } = {}) {
+  ensureTable();
+  const conditions = ["opened_at >= datetime('now', ?)"];
+  const params = [`-${days} days`];
+  if (status) { conditions.push("status = ?"); params.push(status); }
+  params.push(Math.min(limit, 5000));
+
+  return getDb().prepare(`
+    SELECT
+      id, signal_id, market_id, question, category, side, strength,
+      amount, entry_price, fill_price, exit_price, pnl_usd, pnl_pct,
+      status, close_reason, dry_run, edge, confidence,
+      quality, regime, streak_mult, hour_mult, sizing_method,
+      opened_at, closed_at
+    FROM trade_executions
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY opened_at DESC
+    LIMIT ?
+  `).all(...params);
+}
+
+/**
+ * Get daily trade summary for a specific date (YYYY-MM-DD, defaults to today UTC).
+ */
+export function getDailySummary(date) {
+  ensureTable();
+  const db = getDb();
+  const d = date || new Date().toISOString().slice(0, 10);
+
+  const overview = db.prepare(`
+    SELECT
+      COUNT(*) as trades,
+      SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+      SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_count,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct,
+      ROUND(SUM(amount), 2) as total_wagered,
+      ROUND(AVG(quality), 1) as avg_quality,
+      MAX(pnl_usd) as best_trade_pnl,
+      MIN(pnl_usd) as worst_trade_pnl,
+      SUM(CASE WHEN dry_run = 1 THEN 1 ELSE 0 END) as dry_runs,
+      SUM(CASE WHEN dry_run = 0 THEN 1 ELSE 0 END) as live_trades
+    FROM trade_executions
+    WHERE DATE(opened_at) = ?
+  `).get(d);
+
+  const settled = (overview.wins || 0) + (overview.losses || 0);
+  overview.win_rate = settled > 0 ? Math.round((overview.wins / settled) * 100) : null;
+
+  const byCategory = db.prepare(`
+    SELECT
+      COALESCE(category, 'other') as category,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as pnl
+    FROM trade_executions
+    WHERE DATE(opened_at) = ? AND status = 'closed'
+    GROUP BY category ORDER BY pnl DESC
+  `).all(d);
+
+  const byRegime = db.prepare(`
+    SELECT
+      COALESCE(regime, 'unknown') as regime,
+      COUNT(*) as trades,
+      ROUND(SUM(pnl_usd), 4) as pnl
+    FROM trade_executions
+    WHERE DATE(opened_at) = ?
+    GROUP BY regime ORDER BY trades DESC
+  `).all(d);
+
+  const bySide = db.prepare(`
+    SELECT
+      side, COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as pnl
+    FROM trade_executions
+    WHERE DATE(opened_at) = ? AND status = 'closed'
+    GROUP BY side
+  `).all(d);
+
+  return { date: d, overview, byCategory, byRegime, bySide };
 }

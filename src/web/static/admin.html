@@ -208,6 +208,12 @@
       <div id="hourlyBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Audit Timeline -->
+    <div class="card wide">
+      <div class="card-title">Trade Audit Timeline</div>
+      <div id="auditTimelineBlock" style="max-height:280px;overflow-y:auto"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
@@ -259,7 +265,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -275,7 +281,8 @@ async function loadAdmin() {
       fetch("/api/trading/config").then(r => r.json()).catch(() => null),
       fetch("/api/trading/analytics").then(r => r.json()).catch(() => null),
       fetch("/api/trading/hourly-stats").then(r => r.json()).catch(() => []),
-      fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/audit?days=1&limit=25").then(r => r.json()).catch(() => [])
     ]);
 
     renderHealth(health);
@@ -292,6 +299,7 @@ async function loadAdmin() {
     if (analytics) renderAnalytics(analytics);
     if (hourlyStats) renderHourly(hourlyStats);
     if (filterStatsData) renderFilterStats(filterStatsData);
+    if (auditEvents) renderAuditTimeline(auditEvents);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -779,6 +787,41 @@ function renderHourly(data) {
     </div>`;
   }
   html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderAuditTimeline(events) {
+  const el = $("auditTimelineBlock");
+  if (!el) return;
+  const list = Array.isArray(events) ? events : [];
+  if (list.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No audit events today</div>'; return; }
+
+  const colors = {
+    ORDER_PLACED: "#a78bfa", ORDER_FILLED: "#34d399", ORDER_PARTIAL_FILL: "#fbbf24",
+    ORDER_REJECTED: "#f87171", ORDER_FILL_FAILED: "#f87171", ORDER_FILL_ERROR: "#f87171",
+    POSITION_OPENED: "#34d399", POSITION_CLOSED: "#60a5fa", POSITION_AUTO_REPAIRED: "#fbbf24",
+    RISK_BLOCKED: "#f87171", CIRCUIT_BREAKER: "#f87171", BOT_STATE_CHANGE: "#c084fc",
+    CONFIG_CHANGE: "#c084fc", SETTLEMENT: "#60a5fa"
+  };
+
+  let html = '';
+  for (const evt of list) {
+    const color = colors[evt.event_type] || "#6b7280";
+    const time = evt.created_at ? new Date(evt.created_at).toLocaleTimeString() : "";
+    const dryTag = evt.dry_run ? '<span style="color:#6b7280;font-size:9px">[DRY]</span>' : '';
+    const amtStr = evt.amount ? `$${Number(evt.amount).toFixed(2)}` : "";
+    const pnlStr = evt.pnl_usd != null ? ` <span style="color:${evt.pnl_usd >= 0 ? "#34d399" : "#f87171"}">${evt.pnl_usd >= 0 ? "+" : ""}$${Number(evt.pnl_usd).toFixed(2)}</span>` : "";
+    let detail = "";
+    try { const d = evt.detail ? JSON.parse(evt.detail) : {}; detail = d.quality ? `Q:${d.quality}` : ""; } catch { detail = ""; }
+    const sideTag = evt.side ? `<span style="color:${evt.side === "UP" ? "#34d399" : "#f87171"};font-weight:600">${evt.side}</span>` : "";
+
+    html += `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #141420;align-items:baseline;font-size:11px">
+      <span style="color:#4b5563;min-width:65px;font-size:10px">${time}</span>
+      <span style="color:${color};font-weight:600;min-width:140px;font-size:10px">${esc(evt.event_type)}</span>
+      <span style="color:#9ca3af;flex:1">${sideTag} ${amtStr}${pnlStr} ${detail} ${dryTag}</span>
+      <span style="color:#27272f;font-size:9px">#${evt.execution_id || "-"}</span>
+    </div>`;
+  }
   el.innerHTML = html;
 }
 

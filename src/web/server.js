@@ -46,7 +46,7 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates, getQualityDistribution, exportExecutions, getDailySummary } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats, getFilterStats } from "../trading/scanner-trader.js";
@@ -808,21 +808,38 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   });
 
   app.get("/api/trading/quality-stats", async () => {
-    // Quality distribution from recent executions (parse from audit log detail)
-    const recent = getRecentExecutions(200);
-    const buckets = { "0-29": 0, "30-49": 0, "50-69": 0, "70-89": 0, "90-100": 0 };
-    let withQuality = 0;
-    for (const exec of recent) {
-      if (!exec.liquidity_check) continue; // quality stored in execution detail
-      try {
-        // Quality is logged in audit events, approximate from confidence + edge
-        const q = exec.confidence ?? 0;
-        const bucket = q < 30 ? "0-29" : q < 50 ? "30-49" : q < 70 ? "50-69" : q < 90 ? "70-89" : "90-100";
-        buckets[bucket]++;
-        withQuality++;
-      } catch { /* skip */ }
+    return getQualityDistribution();
+  });
+
+  app.get("/api/trading/daily-summary", async (req) => {
+    const date = req.query.date || undefined;
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "provide ?date=YYYY-MM-DD" };
+    return getDailySummary(date);
+  });
+
+  app.get("/api/trading/export", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    const status = req.query.status || undefined;
+    const limit = Math.min(Number(req.query.limit) || 1000, 5000);
+    const rows = exportExecutions({ days, status, limit });
+    const format = req.query.format || "json";
+
+    if (format === "csv") {
+      if (rows.length === 0) return { csv: "", count: 0 };
+      const headers = Object.keys(rows[0]);
+      const csvLines = [headers.join(",")];
+      for (const row of rows) {
+        csvLines.push(headers.map(h => {
+          const val = row[h];
+          if (val == null) return "";
+          const str = String(val);
+          return str.includes(",") || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+        }).join(","));
+      }
+      return { csv: csvLines.join("\n"), count: rows.length };
     }
-    return { total: recent.length, withQuality, distribution: buckets };
+
+    return { executions: rows, count: rows.length };
   });
 
   app.get("/api/trading/audit", async (req) => {

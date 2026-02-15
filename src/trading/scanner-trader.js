@@ -150,6 +150,9 @@ async function processSignal(tick) {
     return;
   }
 
+  // Decision context — persisted with every execution for post-hoc analysis
+  const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, sizingMethod: sizing.method };
+
   console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""})`);
 
   // Dry run path
@@ -158,7 +161,8 @@ async function processSignal(tick) {
     const execId = logExecution({
       signalId: String(Date.now()), marketId, tokenId: tokenId || "",
       question, category, side: rec.side, strength: rec.strength,
-      amount: betSize, entryPrice, dryRun: true, edge, confidence
+      amount: betSize, entryPrice, dryRun: true, edge, confidence,
+      ...decisionCtx
     });
     registerTrade({ signalId: Date.now(), marketId, tokenId: tokenId || "", side: rec.side, entryPrice, betSize, dryRun: true, executionId: execId });
     recordTradeOpen();
@@ -175,7 +179,8 @@ async function processSignal(tick) {
     logExecution({
       signalId: String(Date.now()), marketId,
       side: rec.side, strength: rec.strength, amount: betSize,
-      entryPrice, dryRun: false, status: "failed", error: "no_token_id"
+      entryPrice, dryRun: false, status: "failed", error: "no_token_id",
+      ...decisionCtx
     });
     return;
   }
@@ -202,7 +207,8 @@ async function processSignal(tick) {
         signalId: String(Date.now()), marketId, tokenId,
         question, category, side: rec.side, strength: rec.strength,
         amount: betSize, entryPrice, dryRun: false, status: "failed",
-        edge, confidence, liquidityCheck: liquidityResult, error: liquidityResult.reason
+        edge, confidence, liquidityCheck: liquidityResult, error: liquidityResult.reason,
+        ...decisionCtx
       });
       return;
     }
@@ -220,7 +226,8 @@ async function processSignal(tick) {
       dryRun: false, status: result.ok ? "open" : "failed",
       orderId: result.data?.orderID || result.data?.id || null,
       edge, confidence, liquidityCheck: liquidityResult,
-      error: result.ok ? null : JSON.stringify(result.data)
+      error: result.ok ? null : JSON.stringify(result.data),
+      ...decisionCtx
     });
 
     if (result.ok) {
@@ -276,7 +283,8 @@ async function processSignal(tick) {
       signalId: String(Date.now()), marketId, tokenId,
       question, category, side: rec.side, strength: rec.strength,
       amount: betSize, entryPrice, dryRun: false, status: "failed",
-      edge, confidence, error: err.message
+      edge, confidence, error: err.message,
+      ...decisionCtx
     });
     console.log(`  -> ORDER FAILED: ${err.message}`);
   }
