@@ -1544,23 +1544,32 @@ window.removeStrategy = removeStrategy;
 
 let feedSignals = [];
 let feedFilter = "all";
-let feedOffset = 0;
+let feedCursor = null;
+let feedHasMore = true;
 const FEED_PAGE = 50;
 
 async function loadFeed(append = false) {
   try {
     const limit = FEED_PAGE;
-    const offset = append ? feedOffset : 0;
-    const res = await fetch(`/api/signals/recent?limit=${limit + offset}`);
-    const all = await res.json();
+    let url = `/api/signals/recent?limit=${limit}`;
+    if (append && feedCursor) url += `&before=${feedCursor}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    // Handle both cursor response { signals, nextCursor, hasMore } and legacy array
+    const signals = data.signals || data;
+    const nextCursor = data.nextCursor ?? null;
+    const hasMore = data.hasMore ?? (signals.length >= limit);
 
     if (!append) {
-      feedSignals = all;
-      feedOffset = all.length;
+      feedSignals = signals;
     } else {
-      feedSignals = all;
-      feedOffset = all.length;
+      feedSignals = feedSignals.concat(signals);
     }
+
+    feedCursor = nextCursor;
+    feedHasMore = hasMore;
 
     renderFeed();
   } catch (err) {
@@ -1630,7 +1639,7 @@ function renderFeed() {
     </div>`;
   }).join("");
 
-  const moreBtn = feedSignals.length >= feedOffset
+  const moreBtn = feedHasMore
     ? `<div class="feed-more"><button class="feed-more-btn" onclick="loadFeed(true)">Load More</button></div>`
     : "";
 

@@ -22,7 +22,7 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, walkForwardValidation, getLeaderboard, getSignalById, getRegimeAnalytics } from "../signals/history.js";
+import { getRecentSignals, getRecentSignalsCursor, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, walkForwardValidation, getLeaderboard, getSignalById, getRegimeAnalytics } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
@@ -41,6 +41,9 @@ import { startTrial, getTrialStatus } from "../subscribers/trial.js";
 import { getOrCreateReferralCode, claimReferral, getReferralStats } from "../referrals/tracker.js";
 import { listAllSubscribers, grantCompAccess } from "../subscribers/manager.js";
 import { getCacheStats, cachedResponse } from "./cache.js";
+import { startTrialReminderSchedule } from "../subscribers/trial-reminders.js";
+import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "../maintenance/scheduler.js";
+import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -82,6 +85,10 @@ export async function startWebServer(opts = {}) {
   });
 
   await app.register(fastifyWebSocket);
+
+  /* ── Performance tracking hooks ── */
+  app.addHook("onRequest", perfStartHook);
+  app.addHook("onResponse", perfHook);
 
   /* ── WebSocket ── */
 
@@ -204,6 +211,18 @@ export async function startWebServer(opts = {}) {
     const plan = extractPlan(req);
     const limits = getPlanLimits(plan);
     const limit = Math.min(Number(req.query.limit) || 50, limits.recentSignalsLimit);
+    const before = req.query.before ? Number(req.query.before) : null;
+
+    if (before) {
+      // Cursor-based pagination
+      const result = getRecentSignalsCursor(limit, before);
+      if (plan === "free") {
+        result.signals = result.signals.map(s => ({ ...s, kelly_bet_pct: undefined }));
+      }
+      return result;
+    }
+
+    // Legacy offset-compatible mode
     const signals = getRecentSignals(limit);
     return plan === "free" ? signals.map(s => ({ ...s, kelly_bet_pct: undefined })) : signals;
   });
@@ -451,11 +470,11 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   /* ── Auth routes ── */
 
   app.post("/api/auth/login", async (req, reply) => {
-    const { email } = req.body || {};
+    const { email, ref } = req.body || {};
     if (!email || !email.includes("@")) {
       return reply.code(400).send({ error: "invalid_email" });
     }
-    const result = await sendMagicLink(email);
+    const result = await sendMagicLink(email, ref || undefined);
     return result;
   });
 
@@ -669,7 +688,8 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     const plan = req.query.plan || null;
     const status = req.query.status || null;
     const limit = Math.min(Number(req.query.limit) || 50, 200);
-    return listAllSubscribers({ plan, status, limit });
+    const before = req.query.before ? Number(req.query.before) : null;
+    return listAllSubscribers({ plan, status, limit, before });
   });
 
   app.post("/api/admin/grant-comp", { preHandler: requireAuth }, async (req) => {
@@ -682,6 +702,24 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/admin/cache-stats", async () => {
     return getCacheStats();
+  });
+
+  /* ── Performance & Maintenance Admin ── */
+
+  app.get("/api/admin/perf", async () => {
+    return getPerfStats();
+  });
+
+  app.post("/api/admin/perf/reset", { preHandler: requireAuth }, async () => {
+    return resetPerfStats();
+  });
+
+  app.get("/api/admin/maintenance", async () => {
+    return getMaintenanceStatus();
+  });
+
+  app.post("/api/admin/maintenance/run", { preHandler: requireAuth }, async () => {
+    return runMaintenance();
   });
 
   /* ── API Key Auth (X-API-Key header) ── */
@@ -796,6 +834,8 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/v1/signals", { preHandler: requireApiKeyOrSession }, async (req) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const before = req.query.before ? Number(req.query.before) : null;
+    if (before) return getRecentSignalsCursor(limit, before);
     return getRecentSignals(limit);
   });
 
@@ -834,6 +874,10 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   // Start webhook delivery queue processor
   startQueueProcessor();
+
+  // Start scheduled background tasks
+  startTrialReminderSchedule();
+  startMaintenanceSchedule();
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`Web dashboard: http://localhost:${PORT}`);

@@ -302,6 +302,41 @@ export function getRecentSignals(limit = 50) {
 }
 
 /**
+ * Get recent signals with cursor-based pagination.
+ * @param {number} limit
+ * @param {number|null} before - signal ID cursor (fetch signals with id < before)
+ * @returns {{ signals: Array, nextCursor: number|null, hasMore: boolean }}
+ */
+export function getRecentSignalsCursor(limit = 50, before = null) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  const fetchLimit = limit + 1; // fetch one extra to detect hasMore
+
+  let rows;
+  if (before) {
+    rows = db.prepare(`
+      SELECT * FROM signal_history
+      WHERE signal != 'NO TRADE' AND id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(before, fetchLimit);
+  } else {
+    rows = db.prepare(`
+      SELECT * FROM signal_history
+      WHERE signal != 'NO TRADE'
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(fetchLimit);
+  }
+
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
+  const nextCursor = hasMore && rows.length > 0 ? rows[rows.length - 1].id : null;
+
+  return { signals: rows, nextCursor, hasMore };
+}
+
+/**
  * Void stale signals: mark as VOID if unsettled and created >24h after expected settlement.
  * Returns count of voided signals.
  */

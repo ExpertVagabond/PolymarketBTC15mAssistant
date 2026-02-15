@@ -6,6 +6,7 @@
 import jwt from "jsonwebtoken";
 import { Resend } from "resend";
 import { getByEmail, createSubscriber } from "../subscribers/manager.js";
+import { claimReferral } from "../referrals/tracker.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "polymarket-signal-bot-dev-secret";
 const APP_URL = process.env.APP_URL || "http://localhost:3000";
@@ -23,12 +24,15 @@ function getResend() {
 /**
  * Send a magic link email.
  * @param {string} email
+ * @param {string} [refCode] - Optional referral code to auto-claim on verify
  * @returns {{ ok: boolean, error?: string }}
  */
-export async function sendMagicLink(email) {
+export async function sendMagicLink(email, refCode) {
   const r = getResend();
 
-  const token = jwt.sign({ email, purpose: "magic_link" }, JWT_SECRET, { expiresIn: MAGIC_LINK_TTL });
+  const payload = { email, purpose: "magic_link" };
+  if (refCode) payload.ref = refCode;
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: MAGIC_LINK_TTL });
   const link = `${APP_URL}/auth/verify?token=${encodeURIComponent(token)}`;
 
   // Ensure subscriber exists (free tier by default)
@@ -71,13 +75,21 @@ export function verifyMagicLink(token) {
     const sub = getByEmail(payload.email);
     if (!sub) return { ok: false, error: "subscriber_not_found" };
 
+    // Auto-claim referral if ref code was embedded in the magic link
+    let referralResult = null;
+    if (payload.ref) {
+      try {
+        referralResult = claimReferral(payload.ref, payload.email);
+      } catch { /* non-fatal */ }
+    }
+
     const sessionToken = jwt.sign(
       { email: payload.email, subscriberId: sub.id, plan: sub.plan },
       JWT_SECRET,
       { expiresIn: SESSION_TTL }
     );
 
-    return { ok: true, sessionToken, subscriber: sub };
+    return { ok: true, sessionToken, subscriber: sub, referralResult };
   } catch (err) {
     return { ok: false, error: err.message };
   }

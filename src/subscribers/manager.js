@@ -146,15 +146,21 @@ export function listPaidSubscribers() {
 
 /* ── admin: list all subscribers with filters ── */
 
-export function listAllSubscribers({ plan = null, status = null, limit = 50 } = {}) {
+export function listAllSubscribers({ plan = null, status = null, limit = 50, before = null } = {}) {
   const db = getDb();
   let sql = "SELECT id, email, plan, status, created_at, expires_at, telegram_user_id, discord_user_id FROM subscribers WHERE 1=1";
   const params = [];
   if (plan) { sql += " AND plan = ?"; params.push(plan); }
   if (status) { sql += " AND status = ?"; params.push(status); }
-  sql += " ORDER BY created_at DESC LIMIT ?";
-  params.push(limit);
-  return db.prepare(sql).all(...params);
+  if (before) { sql += " AND id < ?"; params.push(before); }
+  sql += " ORDER BY id DESC LIMIT ?";
+  const fetchLimit = limit + 1;
+  params.push(fetchLimit);
+  const rows = db.prepare(sql).all(...params);
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
+  const nextCursor = hasMore && rows.length > 0 ? rows[rows.length - 1].id : null;
+  return { subscribers: rows, nextCursor, hasMore };
 }
 
 /* ── admin: grant complimentary access ── */

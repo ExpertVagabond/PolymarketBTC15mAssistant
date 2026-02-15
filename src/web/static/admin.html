@@ -151,6 +151,19 @@
       <div id="cacheBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Endpoint Performance -->
+    <div class="card">
+      <div class="card-title">Endpoint Performance</div>
+      <div id="perfBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="card">
+      <div class="card-title">DB Maintenance</div>
+      <div id="maintenanceBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+      <button style="margin-top:8px;padding:4px 12px;font-size:11px;background:#1e1e2a;border:1px solid #2d2d3a;color:#a5b4fc;border-radius:6px;cursor:pointer" onclick="runMaintenance()">Run Now</button>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
@@ -202,14 +215,16 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
       fetch("/api/learning/drift-status").then(r => r.json()).catch(() => null),
       fetch("/api/admin/webhook-queue").then(r => r.json()).catch(() => null),
       fetch("/api/admin/delivery-stats").then(r => r.json()).catch(() => null),
-      fetch("/api/admin/cache-stats").then(r => r.json()).catch(() => null)
+      fetch("/api/admin/cache-stats").then(r => r.json()).catch(() => null),
+      fetch("/api/admin/perf").then(r => r.json()).catch(() => null),
+      fetch("/api/admin/maintenance").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -219,6 +234,8 @@ async function loadAdmin() {
     if (whQueue) renderWebhookQueue(whQueue);
     if (delivery) renderDeliveryHealth(delivery);
     if (cacheStats) renderCacheStats(cacheStats);
+    if (perf) renderPerfStats(perf);
+    if (maint) renderMaintenance(maint);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -374,8 +391,10 @@ async function loadSubscribers() {
   const plan = $("subFilter")?.value || "";
   const url = "/api/admin/subscribers" + (plan ? "?plan=" + plan : "");
   try {
-    const subs = await fetch(url).then(r => r.json());
-    if (!Array.isArray(subs) || subs.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No subscribers found</div>'; return; }
+    const data = await fetch(url).then(r => r.json());
+    // Handle both cursor { subscribers, nextCursor } and legacy array
+    const subs = data.subscribers || (Array.isArray(data) ? data : []);
+    if (subs.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No subscribers found</div>'; return; }
     el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead><tr>
         <th style="text-align:left;padding:6px 8px;color:#4b5563;font-size:9px;text-transform:uppercase;border-bottom:1px solid #1e1e2a">Email</th>
@@ -401,6 +420,43 @@ async function loadSubscribers() {
   } catch {
     el.innerHTML = '<div style="color:#4b5563;font-size:12px">Failed to load subscribers</div>';
   }
+}
+
+function renderPerfStats(p) {
+  const el = $("perfBlock");
+  if (!el) return;
+  const routes = (p.routes || []).slice(0, 8);
+  if (routes.length === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No data yet</div>'; return; }
+  let html = '';
+  for (const r of routes) {
+    const avgColor = r.avgMs < 50 ? "green" : r.avgMs < 200 ? "amber" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(r.route)}</span><span class="v ${avgColor}">${r.avgMs}ms <span style="color:#4b5563;font-size:9px">(${r.count}x)</span></span></div>`;
+  }
+  if ((p.slowRequests || []).length > 0) {
+    html += `<div class="kv"><span class="k">Slow Requests</span><span class="v red">${p.slowRequests.length}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderMaintenance(m) {
+  const el = $("maintenanceBlock");
+  if (!el) return;
+  let html = `<div class="kv"><span class="k">Last Run</span><span class="v">${m.lastRun ? new Date(m.lastRun).toLocaleString() : "Never"}</span></div>`;
+  html += `<div class="kv"><span class="k">Total Runs</span><span class="v blue">${m.runCount ?? 0}</span></div>`;
+  if (m.lastResults) {
+    const r = m.lastResults;
+    html += `<div class="kv"><span class="k">Last: Voided</span><span class="v">${r.voided ?? "-"}</span></div>`;
+    html += `<div class="kv"><span class="k">Last: Purged</span><span class="v">${r.purgedSignals ?? "-"} signals, ${r.purgedQueue ?? "-"} queue</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function runMaintenance() {
+  try {
+    const res = await fetch("/api/admin/maintenance/run", { method: "POST" });
+    const data = await res.json();
+    renderMaintenance({ lastRun: new Date().toISOString(), runCount: "-", lastResults: data });
+  } catch {}
 }
 
 async function grantComp() {

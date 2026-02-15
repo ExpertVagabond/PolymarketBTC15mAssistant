@@ -138,6 +138,9 @@
 </div>
 
 <script>
+// Capture referral code from URL (?ref=PS-xxxx)
+const urlRef = new URLSearchParams(window.location.search).get('ref') || '';
+
 async function startCheckout(plan) {
   // First check if logged in
   try {
@@ -145,7 +148,9 @@ async function startCheckout(plan) {
     if (!me.email) {
       const email = prompt('Enter your email to get started:');
       if (!email || !email.includes('@')) return;
-      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+      const body = { email };
+      if (urlRef) body.ref = urlRef;
+      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       alert('Check your email for a sign-in link! After signing in, come back to subscribe.');
       return;
     }
@@ -174,7 +179,9 @@ async function startFreeTrial() {
     if (!me.email) {
       const email = prompt('Enter your email to start your free trial:');
       if (!email || !email.includes('@')) return;
-      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+      const body = { email };
+      if (urlRef) body.ref = urlRef;
+      await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       alert('Check your email for a sign-in link! After signing in, your 7-day Pro trial will start automatically.');
       return;
     }

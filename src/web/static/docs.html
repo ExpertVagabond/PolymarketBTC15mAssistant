@@ -137,6 +137,9 @@
   <div class="section-title">Admin — User Management</div>
   <div id="adminUserEndpoints"></div>
 
+  <div class="section-title">Admin — Performance & Maintenance</div>
+  <div id="perfMaintenanceEndpoints"></div>
+
   <div class="section-title">Observability — Error Logs</div>
   <div id="logsEndpoints"></div>
 
@@ -159,7 +162,7 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/scanner/stats", desc: "Scanner statistics (tracked, categories, signal count)", tryable: true }
   ],
   signalEndpoints: [
-    { method: "GET", path: "/api/signals/recent?limit=10", desc: "Recent signal history (default 50, max 200)", tryable: true },
+    { method: "GET", path: "/api/signals/recent?limit=10", desc: "Recent signals. Supports cursor pagination: add &before=ID to paginate", tryable: true },
     { method: "GET", path: "/api/signals/stats", desc: "Overall win rate, P&L, category/strength breakdown", tryable: true },
     { method: "GET", path: "/api/public-stats?days=30", desc: "Full performance dashboard data for public stats page", tryable: true },
     { method: "GET", path: "/api/signal/:id", desc: "Single signal detail by ID" }
@@ -253,16 +256,22 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/referral/stats", desc: "Referral stats: completed, rewards earned, next reward progress" }
   ],
   adminUserEndpoints: [
-    { method: "GET", path: "/api/admin/subscribers?plan=pro", desc: "List all subscribers with optional plan/status filter", tryable: true },
+    { method: "GET", path: "/api/admin/subscribers?plan=pro", desc: "List subscribers. Supports cursor: &before=ID. Returns { subscribers, nextCursor, hasMore }", tryable: true },
     { method: "POST", path: "/api/admin/grant-comp", desc: "Grant comp access. Body: { email, plan, days }" },
     { method: "GET", path: "/api/admin/cache-stats", desc: "Response cache hit rate and entry count", tryable: true }
+  ],
+  perfMaintenanceEndpoints: [
+    { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },
+    { method: "POST", path: "/api/admin/perf/reset", desc: "Reset performance counters (auth required)" },
+    { method: "GET", path: "/api/admin/maintenance", desc: "Last maintenance run status, next scheduled", tryable: true },
+    { method: "POST", path: "/api/admin/maintenance/run", desc: "Manually trigger maintenance (void stale, purge old, ANALYZE)" }
   ],
   logsEndpoints: [
     { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },
     { method: "GET", path: "/api/logs/trends?days=7", desc: "Error trends by source and level", tryable: true }
   ],
   v1Endpoints: [
-    { method: "GET", path: "/api/v1/signals", desc: "Recent signals (requires X-API-Key header)" },
+    { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
     { method: "GET", path: "/api/v1/stats", desc: "Signal statistics (requires X-API-Key header)" },
     { method: "GET", path: "/api/v1/scanner", desc: "Active signals + scanner stats (requires X-API-Key header)" }
   ]
