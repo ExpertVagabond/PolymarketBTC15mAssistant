@@ -160,6 +160,30 @@ export function getOpenCount() {
 }
 
 /**
+ * Check if there's an open position on a given market.
+ */
+export function hasOpenPositionOnMarket(marketId) {
+  ensureTable();
+  const row = getDb().prepare(
+    "SELECT id FROM trade_executions WHERE market_id = ? AND status = 'open' LIMIT 1"
+  ).get(marketId);
+  return !!row;
+}
+
+/**
+ * Check if a trade was recently opened on a market (cooldown).
+ * @param {string} marketId
+ * @param {number} cooldownMinutes - minimum minutes between trades on same market
+ */
+export function isMarketOnCooldown(marketId, cooldownMinutes = 5) {
+  ensureTable();
+  const row = getDb().prepare(
+    "SELECT id FROM trade_executions WHERE market_id = ? AND opened_at >= datetime('now', ?) ORDER BY opened_at DESC LIMIT 1"
+  ).get(marketId, `-${cooldownMinutes} minutes`);
+  return !!row;
+}
+
+/**
  * Get trade execution stats.
  */
 export function getExecutionStats() {

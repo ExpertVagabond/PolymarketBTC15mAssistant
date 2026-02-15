@@ -7,13 +7,13 @@ import { createPoller } from "../core/poller.js";
 import { createWindowTracker } from "../backtest/window-tracker.js";
 import { checkAndAlert } from "../alerts/manager.js"; // legacy Telegram/Discord
 import { dispatchWebhooks, dispatchEmailAlerts } from "../notifications/dispatch.js";
-import { canTrade, getBetSize, recordTradeOpen, recordTradeClose, getRiskStatus, syncOpenPositions } from "./risk-manager.js";
+import { canTrade, getBetSize, getKellyBetSize, recordTradeOpen, recordTradeClose, getRiskStatus, syncOpenPositions } from "./risk-manager.js";
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
 import { placeMarketOrder, placeSellOrder, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
-import { logExecution, getOpenCount, failExecution } from "./execution-log.js";
+import { logExecution, getOpenCount, failExecution, hasOpenPositionOnMarket, isMarketOnCooldown } from "./execution-log.js";
 import { logAuditEvent } from "./audit-log.js";
 import { applyGlobalProxyFromEnv } from "../net/proxy.js";
 
@@ -82,6 +82,16 @@ export async function startTradingBot() {
       return;
     }
 
+    // Dedup: skip if already holding this market or recently traded
+    if (state.marketId && hasOpenPositionOnMarket(state.marketId)) {
+      if (tickCount % 60 === 0) console.log(`[${new Date().toISOString()}] SKIP: already holding position on ${state.marketId}`);
+      return;
+    }
+    if (state.marketId && isMarketOnCooldown(state.marketId)) {
+      if (tickCount % 60 === 0) console.log(`[${new Date().toISOString()}] SKIP: cooldown active on ${state.marketId}`);
+      return;
+    }
+
     // only trade on ENTER signals with STRONG or GOOD strength
     if (rec.action !== "ENTER" || (rec.strength !== "STRONG" && rec.strength !== "GOOD")) {
       if (tickCount % 60 === 0) {
@@ -101,7 +111,8 @@ export async function startTradingBot() {
     }
 
     const edge = rec.side === "UP" ? state.edge?.edgeUp : state.edge?.edgeDown;
-    const betSize = getBetSize(edge ?? 0.1);
+    const sizing = getKellyBetSize(state);
+    const betSize = sizing.amount;
     const tokenId = rec.side === "UP" ? state.poly?.tokens?.upTokenId : state.poly?.tokens?.downTokenId;
     const entryPrice = rec.side === "UP" ? (state.prices?.up ?? 0.5) : (state.prices?.down ?? 0.5);
     const confidence = state.confidence?.score ?? null;

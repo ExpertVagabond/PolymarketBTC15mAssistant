@@ -18,7 +18,12 @@ const DEFAULTS = {
   max_total_exposure_usd: Number(process.env.MAX_TOTAL_EXPOSURE_USD) || 50,
   max_category_concentration_pct: Number(process.env.MAX_CATEGORY_CONCENTRATION_PCT) || 50,
   max_slippage_pct: Number(process.env.MAX_SLIPPAGE_PCT) || 2,
-  min_balance_usd: Number(process.env.MIN_BALANCE_USD) || 1
+  min_balance_usd: Number(process.env.MIN_BALANCE_USD) || 1,
+  trailing_stop_pct: Number(process.env.TRAILING_STOP_PCT) || 5,
+  breakeven_trigger_pct: Number(process.env.BREAKEVEN_TRIGGER_PCT) || 8,
+  max_hold_hours: Number(process.env.MAX_HOLD_HOURS) || 48,
+  min_settlement_minutes: Number(process.env.MIN_SETTLEMENT_MINUTES) || 30,
+  max_spread: Number(process.env.MAX_SPREAD) || 0.05
 };
 
 // Allowed config keys and their validation rules
@@ -31,7 +36,12 @@ const CONFIG_RULES = {
   max_total_exposure_usd: { min: 1, max: 100000, type: "number" },
   max_category_concentration_pct: { min: 10, max: 100, type: "number" },
   max_slippage_pct: { min: 0.1, max: 20, type: "number" },
-  min_balance_usd: { min: 0, max: 10000, type: "number" }
+  min_balance_usd: { min: 0, max: 10000, type: "number" },
+  trailing_stop_pct: { min: 1, max: 50, type: "number" },
+  breakeven_trigger_pct: { min: 1, max: 100, type: "number" },
+  max_hold_hours: { min: 1, max: 720, type: "number" },
+  min_settlement_minutes: { min: 1, max: 10080, type: "number" },
+  max_spread: { min: 0.001, max: 0.5, type: "number" }
 };
 
 let _config = { ...DEFAULTS };

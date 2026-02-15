@@ -130,6 +130,26 @@ export function broadcastScannerState({ state, signals, stats }) {
   }
 }
 
+/**
+ * Broadcast a trading event to all connected clients.
+ * Events: POSITION_OPENED, POSITION_CLOSED, ORDER_PLACED, ORDER_FILLED,
+ *         TRAILING_STOP, BREAKEVEN_STOP, RISK_BLOCKED, etc.
+ */
+export function broadcastTradeEvent(eventType, data) {
+  if (clients.size === 0) return;
+
+  const payload = JSON.stringify({
+    type: "trade",
+    event: eventType,
+    timestamp: Date.now(),
+    ...data
+  });
+
+  for (const ws of clients) {
+    try { ws.send(payload); } catch { clients.delete(ws); }
+  }
+}
+
 export function getClientCount() {
   return clients.size;
 }

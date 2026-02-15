@@ -5,15 +5,17 @@
  * This replaces the single-market poller approach in bot.js with multi-market support.
  */
 
-import { canTrade, getBetSize, recordTradeOpen, getRiskStatus } from "./risk-manager.js";
+import { canTrade, getBetSize, getKellyBetSize, recordTradeOpen, getRiskStatus } from "./risk-manager.js";
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
 import { placeMarketOrder, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
-import { logExecution, failExecution } from "./execution-log.js";
+import { logExecution, failExecution, hasOpenPositionOnMarket, isMarketOnCooldown } from "./execution-log.js";
 import { checkBalance, invalidateBalanceCache } from "./wallet.js";
 import { logAuditEvent } from "./audit-log.js";
+import { getConfigValue } from "./trading-config.js";
+import { broadcastTradeEvent } from "../web/ws-handler.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
@@ -55,6 +57,36 @@ async function processSignal(tick) {
   // Check bot control
   if (!canOpenNewTrades()) return;
 
+  const marketId = tick.marketId || tick.market?.slug || "";
+
+  // Dedup: skip if already holding this market or recently traded
+  if (hasOpenPositionOnMarket(marketId)) {
+    console.log(`[scanner-trader] SKIP: already holding position on ${tick.market?.slug || marketId}`);
+    return;
+  }
+  if (isMarketOnCooldown(marketId)) {
+    console.log(`[scanner-trader] SKIP: cooldown active on ${tick.market?.slug || marketId}`);
+    return;
+  }
+
+  // Settlement time filter: skip markets settling too soon
+  const settlementLeftMin = tick.settlementLeftMin ?? tick.market?.settlementLeftMin ?? null;
+  const minSettlementMin = getConfigValue("min_settlement_minutes");
+  if (settlementLeftMin != null && settlementLeftMin < minSettlementMin) {
+    console.log(`[scanner-trader] SKIP: settling too soon (${Math.round(settlementLeftMin)}min < ${minSettlementMin}min) | ${tick.market?.slug || marketId}`);
+    return;
+  }
+
+  // Spread filter: skip wide-spread markets
+  const side = rec.side;
+  const orderbook = side === "UP" ? tick.market?.orderbook?.up : tick.market?.orderbook?.down;
+  const spread = orderbook?.spread ?? null;
+  const maxSpread = getConfigValue("max_spread");
+  if (spread != null && spread > maxSpread) {
+    console.log(`[scanner-trader] SKIP: spread too wide (${spread.toFixed(3)} > ${maxSpread}) | ${tick.market?.slug || marketId}`);
+    return;
+  }
+
   const category = tick.market?.category || tick.category || null;
 
   // Check risk limits (with category for concentration check)
@@ -66,7 +98,8 @@ async function processSignal(tick) {
   }
 
   const edge = rec.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
-  const betSize = getBetSize(edge ?? 0.1);
+  const sizing = getKellyBetSize(tick);
+  const betSize = sizing.amount;
   const tokenId = rec.side === "UP"
     ? (tick.poly?.tokens?.upTokenId || tick.tokens?.upTokenId)
     : (tick.poly?.tokens?.downTokenId || tick.tokens?.downTokenId);
@@ -75,9 +108,8 @@ async function processSignal(tick) {
     : (tick.prices?.down ?? 0.5);
   const confidence = tick.confidence ?? null;
   const question = tick.market?.question || tick.question || null;
-  const marketId = tick.marketId || tick.market?.slug || "";
 
-  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)}`);
+  console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""})`);
 
   // Dry run path
   if (!ENABLED || DRY_RUN) {
@@ -91,6 +123,7 @@ async function processSignal(tick) {
     recordTradeOpen();
     tradeCount++;
     logAuditEvent("POSITION_OPENED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: entryPrice, dryRun: true });
+    broadcastTradeEvent("POSITION_OPENED", { executionId: execId, marketId, question, side: rec.side, strength: rec.strength, amount: betSize, price: entryPrice, dryRun: true, sizing: sizing.method });
     console.log(`  -> DRY RUN logged (exec #${execId})`);
     return;
   }
@@ -153,6 +186,7 @@ async function processSignal(tick) {
       const orderId = result.data?.orderID || result.data?.id || null;
       invalidateBalanceCache();
       logAuditEvent("ORDER_PLACED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: result.orderPrice, dryRun: false, detail: result.data });
+      broadcastTradeEvent("ORDER_PLACED", { executionId: execId, marketId, question, side: rec.side, amount: betSize, price: result.orderPrice, dryRun: false });
       console.log(`  -> ORDER PLACED (exec #${execId}): ${JSON.stringify(result.data)}`);
 
       // Poll for fill confirmation (non-blocking — runs in background)

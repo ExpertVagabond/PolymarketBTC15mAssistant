@@ -11,10 +11,10 @@ import { placeSellOrder } from "./clob-orders.js";
 import { closeExecution } from "./execution-log.js";
 import { isMonitorActive, checkDrainComplete } from "./bot-control.js";
 import { logAuditEvent } from "./audit-log.js";
+import { getConfigValue } from "./trading-config.js";
+import { broadcastTradeEvent } from "../web/ws-handler.js";
 import { CONFIG } from "../config.js";
 
-const TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT) || 15;
-const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT) || -10;
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
 
@@ -54,7 +54,9 @@ export function registerTrade({ signalId, marketId, tokenId, side, entryPrice, b
     betSize,
     dryRun: !!dryRun,
     executionId: executionId || null,
-    openedAt: Date.now()
+    openedAt: Date.now(),
+    highestPrice: entryPrice,       // peak price tracking for trailing stop
+    breakevenActivated: false        // becomes true once breakeven trigger hit
   });
 }
 
@@ -105,6 +107,21 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
     detail: { closeReason, pnlPct, sellResult: sellResult?.ok ?? null }
   });
 
+  // Broadcast to WS clients
+  broadcastTradeEvent("POSITION_CLOSED", {
+    executionId: trade.executionId,
+    marketId: trade.marketId,
+    side: trade.side,
+    closeReason,
+    entryPrice: trade.entryPrice,
+    exitPrice: currentPrice,
+    highestPrice: trade.highestPrice,
+    pnlPct,
+    pnlUsd,
+    dryRun: trade.dryRun,
+    holdMinutes: Math.round((Date.now() - trade.openedAt) / 60_000)
+  });
+
   openTrades.delete(trade.signalId);
 
   // Check if drain mode should complete
@@ -112,18 +129,30 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
 }
 
 /**
- * Check all open trades for settlement, take-profit, or stop-loss.
- * Called periodically by the monitor loop.
+ * Check all open trades for settlement, take-profit, stop-loss, trailing stop,
+ * breakeven stop, and max hold time.
  */
 async function checkOpenTrades() {
   if (openTrades.size === 0) return;
   if (!isMonitorActive()) return;
+
+  // Read dynamic config each cycle
+  const TAKE_PROFIT_PCT = getConfigValue("take_profit_pct");
+  const STOP_LOSS_PCT = getConfigValue("stop_loss_pct");
+  const TRAILING_STOP_PCT = getConfigValue("trailing_stop_pct");
+  const BREAKEVEN_TRIGGER_PCT = getConfigValue("breakeven_trigger_pct");
+  const MAX_HOLD_HOURS = getConfigValue("max_hold_hours");
 
   for (const [signalId, trade] of openTrades) {
     try {
       // Fetch current price from CLOB
       const currentPrice = await fetchTokenPrice(trade.tokenId);
       if (currentPrice == null) continue;
+
+      // Update peak price
+      if (currentPrice > trade.highestPrice) {
+        trade.highestPrice = currentPrice;
+      }
 
       // Check if market has settled (price at 0 or 1)
       const settled = currentPrice >= 0.99 || currentPrice <= 0.01;
@@ -133,6 +162,20 @@ async function checkOpenTrades() {
         ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100
         : 0;
 
+      // Calculate drawdown from peak
+      const drawdownFromPeak = trade.highestPrice > 0
+        ? ((trade.highestPrice - currentPrice) / trade.highestPrice) * 100
+        : 0;
+
+      // Check breakeven activation
+      if (!trade.breakevenActivated && pnlPct >= BREAKEVEN_TRIGGER_PCT) {
+        trade.breakevenActivated = true;
+        console.log(`[settlement] Breakeven stop activated for signal #${trade.signalId} (pnl: +${pnlPct.toFixed(1)}%)`);
+      }
+
+      // Check hold time
+      const holdHours = (Date.now() - trade.openedAt) / (1000 * 60 * 60);
+
       let closeReason = null;
 
       if (settled) {
@@ -141,6 +184,14 @@ async function checkOpenTrades() {
         closeReason = "TAKE_PROFIT";
       } else if (pnlPct <= STOP_LOSS_PCT) {
         closeReason = "STOP_LOSS";
+      } else if (drawdownFromPeak >= TRAILING_STOP_PCT && pnlPct > 0) {
+        // Trailing stop: only triggers when position is still profitable
+        closeReason = "TRAILING_STOP";
+      } else if (trade.breakevenActivated && currentPrice <= trade.entryPrice) {
+        // Breakeven stop: once triggered, close if price returns to entry
+        closeReason = "BREAKEVEN_STOP";
+      } else if (holdHours >= MAX_HOLD_HOURS) {
+        closeReason = "MAX_HOLD_TIME";
       }
 
       if (closeReason) {
@@ -158,7 +209,7 @@ async function checkOpenTrades() {
  */
 export function startSettlementMonitor() {
   if (monitorTimer) return;
-  console.log(`[settlement] Monitor started (TP: +${TAKE_PROFIT_PCT}%, SL: ${STOP_LOSS_PCT}%, interval: ${CHECK_INTERVAL_MS / 1000}s)`);
+  console.log(`[settlement] Monitor started (TP: +${getConfigValue("take_profit_pct")}%, SL: ${getConfigValue("stop_loss_pct")}%, trail: ${getConfigValue("trailing_stop_pct")}%, maxHold: ${getConfigValue("max_hold_hours")}h)`);
   monitorTimer = setInterval(checkOpenTrades, CHECK_INTERVAL_MS);
   // Run initial check after 10s to let scanner warm up
   setTimeout(checkOpenTrades, 10_000);
@@ -185,12 +236,17 @@ export function getMonitorStatus() {
       marketId: t.marketId,
       side: t.side,
       entryPrice: t.entryPrice,
+      highestPrice: t.highestPrice,
+      breakevenActivated: t.breakevenActivated,
       dryRun: t.dryRun,
       executionId: t.executionId,
       ageMinutes: Math.round((Date.now() - t.openedAt) / 60_000)
     })),
-    takeProfitPct: TAKE_PROFIT_PCT,
-    stopLossPct: STOP_LOSS_PCT,
+    takeProfitPct: getConfigValue("take_profit_pct"),
+    stopLossPct: getConfigValue("stop_loss_pct"),
+    trailingStopPct: getConfigValue("trailing_stop_pct"),
+    breakevenTriggerPct: getConfigValue("breakeven_trigger_pct"),
+    maxHoldHours: getConfigValue("max_hold_hours"),
     running: !!monitorTimer
   };
 }

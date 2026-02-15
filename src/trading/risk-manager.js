@@ -6,6 +6,7 @@
 
 import { getDb } from "../subscribers/db.js";
 import { getConfigValue } from "./trading-config.js";
+import { computeSignalKelly } from "../engines/kelly.js";
 
 // Dynamic getters — read from trading-config (SQLite-backed, changeable at runtime)
 function MAX_BET() { return getConfigValue("max_bet_usd"); }
@@ -108,8 +109,32 @@ export function canTrade(category = null) {
 }
 
 export function getBetSize(edge) {
-  // Simple edge-proportional sizing, capped at MAX_BET
+  // Simple edge-proportional sizing, capped at MAX_BET (fallback when no tick available)
   return Math.min(MAX_BET(), Math.max(0.1, Math.abs(edge) * 10));
+}
+
+/**
+ * Kelly-aware bet sizing. Uses computeSignalKelly when a full tick is available.
+ * Falls back to naive edge-proportional sizing if Kelly returns 0 or data is missing.
+ * @param {object} tick - Full tick from poller/scanner (needs rec, prices, timeAware)
+ * @param {number} bankroll - Current bankroll in USD (for converting betPct to dollars)
+ * @returns {{ amount: number, method: string, kelly: object|null, sizingTier: string|null }}
+ */
+export function getKellyBetSize(tick, bankroll = 100) {
+  const edge = tick.rec?.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
+  const naiveFallback = getBetSize(edge ?? 0.1);
+
+  try {
+    const { kelly, sizingTier } = computeSignalKelly(tick);
+    if (kelly.reason === "ok" && kelly.betPct > 0) {
+      const kellyAmount = Math.min(MAX_BET(), Math.max(0.1, kelly.betPct * bankroll));
+      return { amount: kellyAmount, method: "kelly", kelly, sizingTier };
+    }
+    // Kelly returned 0 — use naive fallback
+    return { amount: naiveFallback, method: "naive", kelly, sizingTier };
+  } catch {
+    return { amount: naiveFallback, method: "naive", kelly: null, sizingTier: null };
+  }
 }
 
 export function recordTradeOpen() {
