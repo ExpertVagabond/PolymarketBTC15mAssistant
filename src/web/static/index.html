@@ -21,6 +21,9 @@
     .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: #333; flex-shrink: 0; }
     .conn-dot.live { background: #34d399; box-shadow: 0 0 6px #34d39966; animation: pulse 2.5s ease-in-out infinite; }
     @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+    .freshness-badge { font-size: 10px; color: #34d399; font-weight: 600; }
+    .freshness-badge.stale { color: #fbbf24; }
+    .freshness-badge.critical { color: #f87171; }
     .header-right { display: flex; align-items: center; gap: 14px; }
     .header-link { color: #6b7280; text-decoration: none; font-size: 12px; font-weight: 500; }
     .header-link:hover { color: #a5b4fc; }
@@ -293,6 +296,8 @@
     .feed-outcome.pending { background: #fbbf2418; color: #fbbf24; }
     .share-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 6px; opacity: 0.35; transition: opacity 0.15s; flex-shrink: 0; }
     .share-btn:hover { opacity: 0.8; }
+    .try-btn { background: #1a1a24; border: 1px solid #2a2a36; border-radius: 6px; padding: 3px 10px; font-size: 10px; color: #93c5fd; cursor: pointer; font-family: inherit; font-weight: 600; transition: all 0.15s; }
+    .try-btn:hover { border-color: #3b82f6; background: #3b82f618; }
     .feed-more { text-align: center; padding: 16px; }
     .feed-more-btn { background: #14141e; border: 1px solid #1e1e2a; border-radius: 6px; padding: 8px 24px; font-size: 12px; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
     .feed-more-btn:hover { border-color: #3b82f6; color: #93c5fd; }
@@ -454,6 +459,7 @@
       <div class="conn-dot" id="statusDot"></div>
       <span id="statusText">Connecting</span>
     </div>
+    <span class="freshness-badge" id="freshnessBadge" title="Data freshness"></span>
   </div>
   <div class="header-right">
     <button class="tab-btn active" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
@@ -719,6 +725,13 @@
       </div>
     </div>
     <button class="sim-run-btn" id="simRunBtn" onclick="runSimulation()">Run Simulation</button>
+    <button class="sim-run-btn" style="background:#1a1a24;border-color:#2a2a36;color:#93c5fd;margin-left:8px" onclick="saveCurrentStrategy()">Save Strategy</button>
+  </div>
+
+  <!-- Saved Strategies -->
+  <div style="margin-top:12px">
+    <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px">SAVED STRATEGIES</div>
+    <div id="strategyList"><div style="color:#4b5563;font-size:11px">No saved strategies</div></div>
   </div>
 
   <!-- Results -->
@@ -876,6 +889,17 @@
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <span class="settings-label">Categories</span>
         <div class="cat-checks" id="emailCatChecks"></div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Max alerts/hour</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="range" id="emailMaxPerHour" min="1" max="50" value="20" oninput="$('emailMaxPerHourVal').textContent=this.value" style="width:120px">
+          <span class="settings-val" id="emailMaxPerHourVal">20</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Throttle status</span>
+        <span class="settings-val" id="throttleStatus" style="color:#6b7280">-</span>
       </div>
       <div style="margin-top:10px"><button class="settings-btn" onclick="saveEmailPrefs()">Save Preferences</button></div>
     </div>

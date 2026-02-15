@@ -129,6 +129,14 @@
     <div id="strengthBreakdown"></div>
   </div>
   <div class="card wide">
+    <div class="card-title">Performance by Regime</div>
+    <div id="regimeBreakdown"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+  </div>
+  <div class="card wide">
+    <div class="card-title">Regime &times; Category Heatmap</div>
+    <div style="overflow-x:auto"><table id="regimeMatrix"><tbody></tbody></table></div>
+  </div>
+  <div class="card wide">
     <div class="card-title">Recent Settled Signals</div>
     <div style="overflow-x:auto">
       <table>
@@ -152,7 +160,10 @@ let charts = {};
 async function loadStats(days = 30) {
   document.querySelectorAll(".period-btn").forEach(b => b.classList.toggle("active", b.textContent.trim() === days + " Days"));
   try {
-    const data = await fetch("/api/public-stats?days=" + days).then(r => r.json());
+    const [data, regime] = await Promise.all([
+      fetch("/api/public-stats?days=" + days).then(r => r.json()),
+      fetch("/api/analytics/regime?days=" + days).then(r => r.json()).catch(() => null)
+    ]);
     renderKPIs(data, days);
     renderEquity(data);
     renderWinRate(data);
@@ -160,6 +171,7 @@ async function loadStats(days = 30) {
     renderCategories(data);
     renderStrengths(data);
     renderSettled(data);
+    if (regime) { renderRegime(regime); renderRegimeMatrix(regime); }
   } catch (err) {
     console.error("Failed to load stats:", err);
   }
@@ -294,6 +306,45 @@ function chartOpts() {
       y: { grid: { color: "#141420" }, ticks: { color: "#4b5563", font: { size: 10 } } }
     }
   };
+}
+
+function renderRegime(r) {
+  const el = $("regimeBreakdown");
+  if (!r.byRegime?.length) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No regime data yet</div>'; return; }
+  el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">' +
+    r.byRegime.map(d => {
+      const color = d.winRate >= 55 ? C.green : d.winRate >= 45 ? C.amber : C.red;
+      return `<div style="background:#14141e;border:1px solid #1e1e2a;border-radius:8px;padding:12px">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;margin-bottom:6px">${esc(d.regime || "unknown")}</div>
+        <div style="font-size:20px;font-weight:700;color:${color}">${d.winRate != null ? d.winRate + "%" : "-"}</div>
+        <div style="font-size:10px;color:#4b5563">${d.wins}W / ${d.losses}L (${d.total})</div>
+      </div>`;
+    }).join("") + '</div>';
+}
+
+function renderRegimeMatrix(r) {
+  const tbody = document.querySelector("#regimeMatrix tbody");
+  if (!r.regimeCategoryMatrix?.length) { tbody.innerHTML = '<tr><td style="color:#4b5563;font-size:12px;padding:8px">No data</td></tr>'; return; }
+  const regimes = [...new Set(r.regimeCategoryMatrix.map(d => d.regime))];
+  const cats = [...new Set(r.regimeCategoryMatrix.map(d => d.category))];
+  const lookup = {};
+  for (const d of r.regimeCategoryMatrix) lookup[d.regime + "|" + d.category] = d;
+  let html = '<tr><th></th>' + regimes.map(r => `<th>${esc(r)}</th>`).join("") + '</tr>';
+  for (const cat of cats) {
+    html += `<tr><td style="font-weight:600">${esc(cat)}</td>`;
+    for (const reg of regimes) {
+      const d = lookup[reg + "|" + cat];
+      if (d) {
+        const bg = d.winRate >= 55 ? "#34d39920" : d.winRate >= 45 ? "#fbbf2420" : "#f8717120";
+        const color = d.winRate >= 55 ? C.green : d.winRate >= 45 ? C.amber : C.red;
+        html += `<td style="background:${bg};color:${color};font-weight:600;text-align:center">${d.winRate}% <span style="color:#4b5563;font-size:9px">(${d.total})</span></td>`;
+      } else {
+        html += '<td style="color:#27272f;text-align:center">-</td>';
+      }
+    }
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

@@ -110,6 +110,9 @@
   <div class="section-title">Authenticated — Email Alerts</div>
   <div id="emailEndpoints"></div>
 
+  <div class="section-title">Observability — Error Logs</div>
+  <div id="logsEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -140,6 +143,7 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/analytics/drawdown", desc: "Max drawdown, consecutive streaks, equity curve", tryable: true },
     { method: "GET", path: "/api/analytics/performance?days=7", desc: "Sharpe ratio, best/worst trade, avg P&L", tryable: true },
     { method: "GET", path: "/api/analytics/market/:marketId", desc: "Per-market performance stats" },
+    { method: "GET", path: "/api/analytics/regime?days=30", desc: "Win rate by regime, regime×category matrix, regime×strength breakdown", tryable: true },
     { method: "GET", path: "/api/analytics/export?format=csv&days=30", desc: "Export signals as CSV or JSON (Pro)", tryable: true }
   ],
   portfolioEndpoints: [
@@ -157,7 +161,12 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/leaderboard", desc: "Category rankings, top-edge wins, streaks, top markets", tryable: true }
   ],
   simulatorEndpoints: [
-    { method: "GET", path: "/api/simulate?minConfidence=60", desc: "Backtest strategy with filters (confidence, edge, category, strength, side)", tryable: true }
+    { method: "GET", path: "/api/simulate?minConfidence=60", desc: "Backtest strategy with filters (confidence, edge, category, strength, side)", tryable: true },
+    { method: "GET", path: "/api/strategies", desc: "List saved strategies", tryable: true },
+    { method: "POST", path: "/api/strategies", desc: "Save strategy. Body: { name, filters, description }" },
+    { method: "GET", path: "/api/strategies/:id/backtest", desc: "Backtest a saved strategy by ID" },
+    { method: "GET", path: "/api/strategies/compare?a=1&b=2", desc: "Compare two strategies side by side" },
+    { method: "DELETE", path: "/api/strategies/:id", desc: "Delete a saved strategy" }
   ],
   authEndpoints: [
     { method: "POST", path: "/api/auth/login", desc: "Send magic link email. Body: { email }" },
@@ -177,8 +186,14 @@ const ENDPOINTS = {
     { method: "DELETE", path: "/api/webhooks/:id", desc: "Delete a webhook" }
   ],
   emailEndpoints: [
-    { method: "GET", path: "/api/email-prefs", desc: "Get email alert preferences" },
-    { method: "POST", path: "/api/email-prefs", desc: "Update prefs. Body: { alertsEnabled, minConfidence, categories }" }
+    { method: "GET", path: "/api/email-prefs", desc: "Get email alert preferences (includes maxAlertsPerHour)" },
+    { method: "POST", path: "/api/email-prefs", desc: "Update prefs. Body: { alertsEnabled, minConfidence, categories, maxAlertsPerHour }" },
+    { method: "GET", path: "/api/throttle-status", desc: "Per-user notification throttle status (count, queued)" },
+    { method: "POST", path: "/api/digest/flush", desc: "Flush queued (throttled) signals for digest" }
+  ],
+  logsEndpoints: [
+    { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },
+    { method: "GET", path: "/api/logs/trends?days=7", desc: "Error trends by source and level", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals (requires X-API-Key header)" },

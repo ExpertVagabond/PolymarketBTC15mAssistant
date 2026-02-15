@@ -15,17 +15,20 @@ import { createWindowTracker } from "../backtest/window-tracker.js";
 import { getState, getHistory } from "../core/state.js";
 import { applyGlobalProxyFromEnv } from "../net/proxy.js";
 import { getAllSourceHealth, getSystemStatus } from "../net/resilience.js";
+import { getFreshness, checkStaleness } from "../net/data-freshness.js";
 import { sendMagicLink, verifyMagicLink, verifySession, requireAuth, requireSubscription } from "./auth.js";
 import { verifyWebhookEvent, handleWebhookEvent } from "../subscribers/stripe-webhook.js";
 import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard, getSignalById } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard, getSignalById, getRegimeAnalytics } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
-import { addWebhook, listWebhooks, deleteWebhook, setEmailPrefs, getEmailPrefs } from "../notifications/dispatch.js";
+import { addWebhook, listWebhooks, deleteWebhook, setEmailPrefs, getEmailPrefs, getThrottleStatus, flushDigestQueue } from "../notifications/dispatch.js";
+import { queryLogs, getErrorTrends } from "../logging/structured-logger.js";
+import { saveStrategy, listStrategies, getStrategy, deleteStrategy, backtestStrategy, compareStrategies } from "../strategies/library.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -107,6 +110,8 @@ export async function startWebServer(opts = {}) {
         heapTotal: Math.round(mem.heapTotal / 1024 / 1024) + "MB"
       },
       wsClients: getClientCount(),
+      freshness: getFreshness(),
+      staleness: checkStaleness(),
       timestamp: new Date().toISOString()
     };
   });
@@ -210,6 +215,11 @@ export async function startWebServer(opts = {}) {
     return getPerformanceSummary(days);
   });
 
+  app.get("/api/analytics/regime", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getRegimeAnalytics(days);
+  });
+
   app.get("/api/analytics/market/:marketId", async (req) => {
     const stats = getMarketStats(req.params.marketId);
     return stats || { error: "no_data", marketId: req.params.marketId };
@@ -253,6 +263,42 @@ export async function startWebServer(opts = {}) {
     if (req.query.minEdge) filters.minEdge = Number(req.query.minEdge);
     if (req.query.sides) filters.sides = req.query.sides.split(",");
     return simulateStrategy(filters);
+  });
+
+  /* ── Strategy Library API ── */
+
+  app.get("/api/strategies", async () => {
+    return listStrategies();
+  });
+
+  app.post("/api/strategies", async (req) => {
+    const { name, filters, description } = req.body || {};
+    if (!name) return { error: "name_required" };
+    const result = saveStrategy(name, filters || {}, description);
+    return result;
+  });
+
+  app.get("/api/strategies/:id/backtest", async (req) => {
+    try {
+      return backtestStrategy(Number(req.params.id));
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
+  app.get("/api/strategies/compare", async (req) => {
+    const a = Number(req.query.a);
+    const b = Number(req.query.b);
+    if (!a || !b) return { error: "provide ?a=ID&b=ID" };
+    try {
+      return compareStrategies(a, b);
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
+  app.delete("/api/strategies/:id", async (req) => {
+    return { deleted: deleteStrategy(Number(req.params.id)) };
   });
 
   /* ── Leaderboard API ── */
@@ -454,6 +500,17 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     };
   });
 
+  /* ── Error Logs API ── */
+
+  app.get("/api/logs", async (req) => {
+    const { source, level, category, days, limit, offset } = req.query;
+    return queryLogs({ source, level, category, days: Number(days) || 7, limit: Number(limit) || 50, offset: Number(offset) || 0 });
+  });
+
+  app.get("/api/logs/trends", async (req) => {
+    return getErrorTrends(Number(req.query.days) || 7);
+  });
+
   /* ── API Key Auth (X-API-Key header) ── */
 
   function requireApiKeyOrSession(req, reply, done) {
@@ -545,9 +602,21 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.post("/api/email-prefs", { preHandler: requireAuth }, async (req) => {
     const email = req.sessionUser?.email;
     if (!email) return { error: "no_email" };
-    const { alertsEnabled, minConfidence, categories } = req.body || {};
-    setEmailPrefs(email, { alertsEnabled, minConfidence, categories });
+    const { alertsEnabled, minConfidence, categories, maxAlertsPerHour } = req.body || {};
+    setEmailPrefs(email, { alertsEnabled, minConfidence, categories, maxAlertsPerHour });
     return { ok: true };
+  });
+
+  app.get("/api/throttle-status", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getThrottleStatus(email);
+  });
+
+  app.post("/api/digest/flush", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return { queued: flushDigestQueue(email) };
   });
 
   /* ── Programmatic API (API key or session auth) ── */

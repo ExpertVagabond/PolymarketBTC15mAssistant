@@ -144,6 +144,9 @@ function switchTab(tab) {
     initSimulatorCategories();
     simulatorLoaded = true;
   }
+  if (tab === "simulator") {
+    loadStrategyList();
+  }
   if (tab === "settings" && !settingsLoaded) {
     loadSettings();
     settingsLoaded = true;
@@ -1291,6 +1294,90 @@ window.toggleSimStr = toggleSimStr;
 window.toggleSimSide = toggleSimSide;
 window.runSimulation = runSimulation;
 
+/* ═══ Strategy Library ═══ */
+
+function getCurrentSimFilters() {
+  const filters = {};
+  const minConf = Number($("simMinConf")?.value);
+  if (minConf > 0) filters.minConfidence = minConf;
+  const minEdge = Number($("simMinEdge")?.value);
+  if (minEdge > 0) filters.minEdge = minEdge / 100;
+  if (simSelectedCats.length > 0) filters.categories = simSelectedCats;
+  if (simSelectedStr !== "all") filters.strengths = [simSelectedStr];
+  if (simSelectedSide !== "all") filters.sides = [simSelectedSide];
+  return filters;
+}
+
+async function saveCurrentStrategy() {
+  const name = prompt("Strategy name:");
+  if (!name) return;
+  const filters = getCurrentSimFilters();
+  try {
+    const res = await fetch("/api/strategies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, filters })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (typeof showToast === "function") showToast("Strategy saved!", "success");
+    loadStrategyList();
+  } catch (e) {
+    if (typeof showToast === "function") showToast("Save failed: " + e.message, "error");
+  }
+}
+
+async function loadStrategyList() {
+  const el = $("strategyList");
+  if (!el) return;
+  try {
+    const strats = await fetch("/api/strategies").then(r => r.json());
+    if (!strats.length) { el.innerHTML = '<div style="color:#4b5563;font-size:11px">No saved strategies</div>'; return; }
+    el.innerHTML = strats.map(s => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #141420;font-size:12px">
+      <span style="flex:1;color:#e5e7eb;font-weight:500">${esc(s.name)}</span>
+      <button class="try-btn" onclick="loadStrategy(${s.id})">Load</button>
+      <button class="try-btn" onclick="backtestStrategy(${s.id})">Backtest</button>
+      <button class="try-btn" style="color:#f87171" onclick="removeStrategy(${s.id})">Del</button>
+    </div>`).join("");
+  } catch { el.innerHTML = '<div style="color:#4b5563;font-size:11px">Failed to load</div>'; }
+}
+
+async function loadStrategy(id) {
+  try {
+    const strats = await fetch("/api/strategies").then(r => r.json());
+    const s = strats.find(x => x.id === id);
+    if (!s) return;
+    const f = s.filters;
+    if ($("simMinConf") && f.minConfidence != null) $("simMinConf").value = f.minConfidence;
+    if ($("simMinEdge") && f.minEdge != null) $("simMinEdge").value = Math.round(f.minEdge * 100);
+    if (typeof showToast === "function") showToast(`Loaded "${s.name}"`, "success");
+  } catch {}
+}
+
+async function backtestSavedStrategy(id) {
+  try {
+    const res = await fetch(`/api/strategies/${id}/backtest`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderSimResults(data.results);
+    if (typeof showToast === "function") showToast(`Backtested "${data.strategy.name}"`, "success");
+  } catch (e) {
+    if (typeof showToast === "function") showToast("Backtest failed: " + e.message, "error");
+  }
+}
+
+async function removeStrategy(id) {
+  try {
+    await fetch(`/api/strategies/${id}`, { method: "DELETE" });
+    loadStrategyList();
+  } catch {}
+}
+
+window.saveCurrentStrategy = saveCurrentStrategy;
+window.loadStrategy = loadStrategy;
+window.backtestStrategy = backtestSavedStrategy;
+window.removeStrategy = removeStrategy;
+
 /* ═══ Signal Feed ═══ */
 
 let feedSignals = [];
@@ -1691,6 +1778,18 @@ async function loadEmailPrefs() {
         cb.checked = selectedCats.includes(cb.value.toLowerCase());
       });
     }
+    if (prefs.maxAlertsPerHour != null && $("emailMaxPerHour")) {
+      $("emailMaxPerHour").value = prefs.maxAlertsPerHour;
+      $("emailMaxPerHourVal").textContent = prefs.maxAlertsPerHour;
+    }
+    // Load throttle status
+    try {
+      const ts = await fetch("/api/throttle-status").then(r => r.json());
+      if ($("throttleStatus")) {
+        $("throttleStatus").textContent = `${ts.count}/${ts.maxPerHour} this hour` + (ts.queuedCount > 0 ? ` (${ts.queuedCount} queued)` : "");
+        $("throttleStatus").style.color = ts.count >= ts.maxPerHour ? "#f87171" : "#34d399";
+      }
+    } catch {}
   } catch { /* not logged in */ }
 }
 
@@ -1709,7 +1808,8 @@ async function saveEmailPrefs() {
       body: JSON.stringify({
         alertsEnabled: emailAlertsEnabled,
         minConfidence: Number($("emailMinConf").value),
-        categories: cats.join(",")
+        categories: cats.join(","),
+        maxAlertsPerHour: Number($("emailMaxPerHour")?.value || 20)
       })
     });
     showToast("Email preferences saved", "success");
@@ -1756,3 +1856,30 @@ window.saveEmailPrefs = saveEmailPrefs;
 window.toggleSound = toggleSound;
 window.saveSoundPrefs = saveSoundPrefs;
 window.testNotification = testNotification;
+
+/* ═══ Data Freshness Poller ═══ */
+
+async function pollFreshness() {
+  try {
+    const r = await fetch("/health/detailed");
+    const data = await r.json();
+    const badge = $("freshnessBadge");
+    if (!badge || !data.staleness) return;
+
+    if (data.staleness.anyStale) {
+      const names = data.staleness.staleSources.join(", ");
+      badge.textContent = `${data.staleness.staleCount} stale`;
+      badge.className = data.staleness.staleCount > 2 ? "freshness-badge critical" : "freshness-badge stale";
+      badge.title = `Stale sources: ${names}`;
+    } else if (data.staleness.totalSources > 0) {
+      badge.textContent = "Fresh";
+      badge.className = "freshness-badge";
+      badge.title = "All data sources are fresh";
+    } else {
+      badge.textContent = "";
+    }
+  } catch { /* ignore */ }
+}
+
+pollFreshness();
+setInterval(pollFreshness, 30_000);

@@ -916,6 +916,76 @@ export function getLeaderboard() {
 }
 
 /**
+ * Get regime-segmented analytics: win rate by regime, regime×category matrix,
+ * regime×confidence breakdown. For strategy tuning and edge identification.
+ * @param {number} days - Lookback period (default 30)
+ */
+export function getRegimeAnalytics(days = 30) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  const daysOffset = `-${Math.min(Math.max(days, 1), 180)} days`;
+
+  // Win rate by regime
+  const byRegime = db.prepare(`
+    SELECT regime, COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      AVG(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct ELSE NULL END) as avg_pnl
+    FROM signal_history
+    WHERE outcome IS NOT NULL AND regime IS NOT NULL
+      AND created_at >= datetime('now', ?)
+    GROUP BY regime ORDER BY total DESC
+  `).all(daysOffset);
+
+  for (const r of byRegime) {
+    r.winRate = r.total > 0 ? +(r.wins / r.total * 100).toFixed(1) : null;
+    r.avg_pnl = r.avg_pnl != null ? +r.avg_pnl.toFixed(4) : null;
+  }
+
+  // Regime × Category matrix
+  const regimeCategory = db.prepare(`
+    SELECT regime, category, COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins
+    FROM signal_history
+    WHERE outcome IS NOT NULL AND regime IS NOT NULL AND category IS NOT NULL
+      AND created_at >= datetime('now', ?)
+    GROUP BY regime, category
+    HAVING total >= 3
+    ORDER BY total DESC
+  `).all(daysOffset);
+
+  const matrix = regimeCategory.map(r => ({
+    regime: r.regime,
+    category: r.category,
+    total: r.total,
+    wins: r.wins,
+    winRate: +(r.wins / r.total * 100).toFixed(1)
+  }));
+
+  // Regime × Strength breakdown
+  const regimeStrength = db.prepare(`
+    SELECT regime, strength, COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins
+    FROM signal_history
+    WHERE outcome IS NOT NULL AND regime IS NOT NULL AND strength IS NOT NULL
+      AND created_at >= datetime('now', ?)
+    GROUP BY regime, strength
+    HAVING total >= 3
+    ORDER BY total DESC
+  `).all(daysOffset);
+
+  const strengthMatrix = regimeStrength.map(r => ({
+    regime: r.regime,
+    strength: r.strength,
+    total: r.total,
+    wins: r.wins,
+    winRate: +(r.wins / r.total * 100).toFixed(1)
+  }));
+
+  return { byRegime, regimeCategoryMatrix: matrix, regimeStrengthMatrix: strengthMatrix, days };
+}
+
+/**
  * Initialize the signal history table.
  */
 export function initSignalHistory() {

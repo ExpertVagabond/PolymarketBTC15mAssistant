@@ -4,6 +4,7 @@
  */
 
 import { sleep } from "../utils.js";
+import { markFresh } from "./data-freshness.js";
 
 /* ── Health metrics store (per source) ── */
 
@@ -36,6 +37,7 @@ function recordSuccess(health, latencyMs) {
   if (health.latencies.length > 20) health.latencies.shift();
   health.circuitOpen = false;
   health.status = "up";
+  markFresh(health.name);
 }
 
 function recordFailure(health, error) {

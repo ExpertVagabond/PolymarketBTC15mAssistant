@@ -122,6 +122,12 @@
         <div class="kv"><span class="k">Free</span><span class="v" id="subFree">-</span></div>
       </div>
     </div>
+
+    <!-- Error Trends -->
+    <div class="card wide">
+      <div class="card-title">Error Trends (7d)</div>
+      <div id="errorBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
   </div>
 </div>
 
@@ -137,13 +143,15 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin] = await Promise.all([
+    const [health, admin, trends] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
-      fetch("/api/admin/stats").then(r => r.json()).catch(() => null)
+      fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
+      fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
     if (admin) renderAdmin(admin);
+    if (trends) renderErrors(trends);
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch {
@@ -211,6 +219,24 @@ function formatUptime(secs) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function renderErrors(t) {
+  const el = $("errorBlock");
+  if (!t.bySource?.length && !t.daily?.length) {
+    el.innerHTML = '<div style="color:#34d399;font-size:12px">No errors in the last 7 days</div>';
+    return;
+  }
+  const sources = (t.bySource || []).map(s =>
+    `<div class="kv"><span class="k">${esc(s.source)}</span><span class="v red">${s.count}</span></div>`
+  ).join("");
+  const levels = (t.byLevel || []).map(l =>
+    `<div class="kv"><span class="k">${esc(l.level)}</span><span class="v ${l.level === "error" ? "red" : l.level === "warn" ? "amber" : ""}">${l.count}</span></div>`
+  ).join("");
+  el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div><div style="font-size:10px;color:#6b7280;margin-bottom:6px;font-weight:700">BY SOURCE</div>${sources || '<div style="color:#4b5563;font-size:11px">None</div>'}</div>
+    <div><div style="font-size:10px;color:#6b7280;margin-bottom:6px;font-weight:700">BY LEVEL</div>${levels || '<div style="color:#4b5563;font-size:11px">None</div>'}</div>
+  </div>`;
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

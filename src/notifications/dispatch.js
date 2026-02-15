@@ -1,9 +1,12 @@
 /**
- * Notification dispatch: webhooks + email alerts.
+ * Notification dispatch: webhooks + email alerts + throttling.
  *
  * Sends signal notifications to:
  * 1. Custom webhook URLs (user-registered endpoints)
  * 2. Email alerts (via Resend, for subscribers with email_alerts enabled)
+ *
+ * Throttling: per-user rate limiting with configurable max alerts/hour.
+ * Excess signals are queued and can be retrieved as a digest.
  *
  * All dispatches are fire-and-forget with error logging.
  */
@@ -11,6 +14,56 @@
 import { getDb } from "../subscribers/db.js";
 
 let stmts = null;
+
+/* ── In-memory per-user throttle tracker ── */
+const userThrottles = new Map(); // email -> { count, windowStart, queued[] }
+const DEFAULT_MAX_PER_HOUR = 20;
+
+function getThrottle(email) {
+  const now = Date.now();
+  let t = userThrottles.get(email);
+  if (!t || now - t.windowStart > 3_600_000) {
+    t = { count: 0, windowStart: now, queued: [] };
+    userThrottles.set(email, t);
+  }
+  return t;
+}
+
+function isThrottled(email, maxPerHour) {
+  const t = getThrottle(email);
+  return t.count >= (maxPerHour || DEFAULT_MAX_PER_HOUR);
+}
+
+function recordSent(email) {
+  const t = getThrottle(email);
+  t.count++;
+}
+
+function queueForDigest(email, tick) {
+  const t = getThrottle(email);
+  if (t.queued.length < 50) { // cap queue at 50
+    t.queued.push({ question: tick.question, side: tick.side, confidence: tick.confidence, edge: tick.edge, ts: Date.now() });
+  }
+}
+
+/**
+ * Get queued (throttled) signals for a user's digest, then clear the queue.
+ */
+export function flushDigestQueue(email) {
+  const t = userThrottles.get(email);
+  if (!t || t.queued.length === 0) return [];
+  const items = [...t.queued];
+  t.queued = [];
+  return items;
+}
+
+/**
+ * Get throttle status for a user.
+ */
+export function getThrottleStatus(email) {
+  const t = getThrottle(email);
+  return { count: t.count, maxPerHour: DEFAULT_MAX_PER_HOUR, queuedCount: t.queued.length, windowStart: new Date(t.windowStart).toISOString() };
+}
 
 function ensureTable() {
   const db = getDb();
@@ -34,9 +87,16 @@ function ensureTable() {
       alerts_enabled INTEGER DEFAULT 0,
       min_confidence INTEGER DEFAULT 60,
       categories TEXT,
+      max_alerts_per_hour INTEGER DEFAULT 20,
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Safe migration: add max_alerts_per_hour column if missing
+  const cols = db.prepare("PRAGMA table_info(email_prefs)").all().map(c => c.name);
+  if (!cols.includes("max_alerts_per_hour")) {
+    db.exec("ALTER TABLE email_prefs ADD COLUMN max_alerts_per_hour INTEGER DEFAULT 20");
+  }
 
   stmts = {
     addWebhook: db.prepare("INSERT INTO webhooks (email, url, name) VALUES (?, ?, ?)"),
@@ -47,8 +107,8 @@ function ensureTable() {
     recordFail: db.prepare("UPDATE webhooks SET fail_count = fail_count + 1, last_error = ? WHERE id = ?"),
     deactivate: db.prepare("UPDATE webhooks SET active = 0 WHERE id = ?"),
     getEmailPrefs: db.prepare("SELECT * FROM email_prefs WHERE email = ?"),
-    setEmailPrefs: db.prepare(`INSERT INTO email_prefs (email, alerts_enabled, min_confidence, categories) VALUES (?, ?, ?, ?)
-      ON CONFLICT(email) DO UPDATE SET alerts_enabled=excluded.alerts_enabled, min_confidence=excluded.min_confidence, categories=excluded.categories`),
+    setEmailPrefs: db.prepare(`INSERT INTO email_prefs (email, alerts_enabled, min_confidence, categories, max_alerts_per_hour) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET alerts_enabled=excluded.alerts_enabled, min_confidence=excluded.min_confidence, categories=excluded.categories, max_alerts_per_hour=excluded.max_alerts_per_hour`),
     activeEmailPrefs: db.prepare("SELECT * FROM email_prefs WHERE alerts_enabled = 1")
   };
 }
@@ -82,11 +142,11 @@ export function deleteWebhook(id, email) {
 }
 
 /**
- * Set email alert preferences.
+ * Set email alert preferences (with optional throttle config).
  */
-export function setEmailPrefs(email, { alertsEnabled = false, minConfidence = 60, categories = null } = {}) {
+export function setEmailPrefs(email, { alertsEnabled = false, minConfidence = 60, categories = null, maxAlertsPerHour = 20 } = {}) {
   if (!stmts) ensureTable();
-  stmts.setEmailPrefs.run(email, alertsEnabled ? 1 : 0, minConfidence, categories ? JSON.stringify(categories) : null);
+  stmts.setEmailPrefs.run(email, alertsEnabled ? 1 : 0, minConfidence, categories ? JSON.stringify(categories) : null, Math.max(1, Math.min(maxAlertsPerHour, 100)));
 }
 
 /**
@@ -96,7 +156,7 @@ export function getEmailPrefs(email) {
   if (!stmts) ensureTable();
   const row = stmts.getEmailPrefs.get(email);
   if (!row) return null;
-  return { ...row, categories: row.categories ? JSON.parse(row.categories) : null };
+  return { ...row, categories: row.categories ? JSON.parse(row.categories) : null, maxAlertsPerHour: row.max_alerts_per_hour ?? 20 };
 }
 
 /**
@@ -170,6 +230,14 @@ export async function dispatchEmailAlerts(tick, resendClient) {
       if (cats.length > 0 && !cats.includes(category)) continue;
     }
 
+    // Throttle check
+    const maxPerHour = pref.max_alerts_per_hour ?? DEFAULT_MAX_PER_HOUR;
+    if (isThrottled(pref.email, maxPerHour)) {
+      queueForDigest(pref.email, tick);
+      continue;
+    }
+
+    recordSent(pref.email);
     sendEmailAlert(pref.email, tick, resendClient).catch(err => {
       console.error(`[email-alert] Failed for ${pref.email}:`, err.message);
     });
