@@ -17,6 +17,7 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
+import { getRecentSignals, getSignalStats } from "../signals/history.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,6 +85,17 @@ export async function startWebServer(opts = {}) {
       return orchestrator.getStats();
     });
   }
+
+  /* ── Signal History API ── */
+
+  app.get("/api/signals/recent", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getRecentSignals(limit);
+  });
+
+  app.get("/api/signals/stats", async () => {
+    return getSignalStats();
+  });
 
   /* ── Auth routes ── */
 
@@ -168,6 +180,7 @@ export async function startWebServer(opts = {}) {
     return {
       subscribers: getSubStats(),
       scanner: orchestrator ? orchestrator.getStats() : null,
+      signals: getSignalStats(),
       wsClients: getClientCount()
     };
   });

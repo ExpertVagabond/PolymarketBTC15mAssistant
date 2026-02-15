@@ -3,71 +3,259 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC 15m Polymarket Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <title>PolySignal</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
-    .header { padding: 16px 24px; background: #111118; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
-    .header h1 { font-size: 18px; color: #fff; font-weight: 600; }
-    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #333; }
-    .dot.live { background: #00ff88; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 24px; }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-    .card { background: #13131a; border: 1px solid #222; border-radius: 8px; padding: 16px; }
-    .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 12px; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0b0b11; color: #c8c8d0; min-height: 100vh; line-height: 1.5; }
+
+    /* ── Header ── */
+    .header { padding: 14px 28px; background: #101018; border-bottom: 1px solid #1e1e2a; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-left h1 { font-size: 17px; color: #fff; font-weight: 700; letter-spacing: -0.3px; }
+    .conn-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 3px 10px; border-radius: 20px; background: #1a1a24; border: 1px solid #2a2a36; }
+    .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: #333; flex-shrink: 0; }
+    .conn-dot.live { background: #34d399; box-shadow: 0 0 6px #34d39966; animation: pulse 2.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-link { color: #6b7280; text-decoration: none; font-size: 12px; font-weight: 500; }
+    .header-link:hover { color: #a5b4fc; }
+
+    /* ── Summary strip ── */
+    .summary-strip { display: flex; align-items: center; gap: 0; padding: 0 28px; background: #0e0e16; border-bottom: 1px solid #1a1a24; }
+    .summary-item { padding: 10px 20px 10px 0; font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 6px; border-right: 1px solid #1a1a24; }
+    .summary-item:last-child { border-right: none; }
+    .summary-item:first-child { padding-left: 0; }
+    .summary-val { color: #e5e7eb; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .summary-val.highlight { color: #34d399; }
+
+    /* ── Signals panel ── */
+    .signals-panel { padding: 20px 28px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .section-title { font-size: 13px; font-weight: 700; color: #e5e7eb; text-transform: uppercase; letter-spacing: 0.8px; }
+    .signal-count-badge { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 20px; background: #34d39920; color: #34d399; }
+    .signal-count-badge.zero { background: #374151; color: #6b7280; }
+
+    .signal-explainer { font-size: 11px; color: #4b5563; margin-bottom: 14px; padding: 10px 14px; background: #111119; border: 1px solid #1e1e2a; border-radius: 6px; line-height: 1.6; }
+    .signal-explainer strong { color: #9ca3af; }
+
+    .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+
+    .sig-card { background: #12121a; border: 1px solid #1e1e2a; border-radius: 10px; padding: 16px 18px; position: relative; overflow: hidden; transition: border-color 0.2s; }
+    .sig-card::before { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 100%; }
+    .sig-card.side-yes::before { background: #34d399; }
+    .sig-card.side-no::before { background: #f87171; }
+    .sig-card.str-strong { border-color: #f8717140; }
+    .sig-card.str-good { border-color: #fbbf2440; }
+
+    .sig-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .sig-action { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .sig-action.yes { color: #34d399; }
+    .sig-action.no { color: #f87171; }
+    .sig-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; }
+    .sig-badge.strong { background: #f8717125; color: #fca5a5; }
+    .sig-badge.good { background: #fbbf2420; color: #fcd34d; }
+    .sig-badge.moderate { background: #3b82f620; color: #93c5fd; }
+
+    .sig-question { font-size: 13px; color: #d1d5db; font-weight: 500; line-height: 1.4; margin-bottom: 10px; }
+
+    .sig-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+    .sig-metric { text-align: center; }
+    .sig-metric-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #4b5563; margin-bottom: 2px; }
+    .sig-metric-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .sig-metric-value.green { color: #34d399; }
+    .sig-metric-value.red { color: #f87171; }
+    .sig-metric-value.amber { color: #fbbf24; }
+
+    .sig-explain { font-size: 11px; color: #6b7280; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1a1a24; line-height: 1.5; }
+    .sig-explain em { color: #9ca3af; font-style: normal; font-weight: 500; }
+
+    .no-signals-box { text-align: center; padding: 32px 20px; color: #374151; }
+    .no-signals-box .icon { font-size: 28px; margin-bottom: 8px; }
+    .no-signals-box p { font-size: 13px; }
+    .no-signals-box p strong { color: #6b7280; }
+
+    /* ── Filter bar ── */
+    .filter-bar { display: flex; gap: 6px; padding: 6px 28px 14px; flex-wrap: wrap; }
+    .fbtn { background: #14141e; border: 1px solid #1e1e2a; border-radius: 6px; padding: 5px 12px; font-size: 11px; color: #6b7280; cursor: pointer; font-family: inherit; font-weight: 500; transition: all 0.15s; }
+    .fbtn:hover { border-color: #3b82f6; color: #93c5fd; }
+    .fbtn.active { background: #3b82f618; border-color: #3b82f6; color: #60a5fa; }
+
+    /* ── Markets table ── */
+    .table-section { padding: 0 28px 32px; }
+    .table-section .section-header { margin-bottom: 10px; }
+    .table-wrap { border: 1px solid #1e1e2a; border-radius: 8px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th { text-align: left; padding: 10px 12px; color: #4b5563; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; background: #0e0e16; border-bottom: 1px solid #1e1e2a; }
+    tbody tr { border-bottom: 1px solid #141420; transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #14141e; }
+    tbody tr.row-signal { background: #34d39908; }
+    tbody tr.row-signal:hover { background: #34d39912; }
+    td { padding: 9px 12px; font-variant-numeric: tabular-nums; }
+
+    .cat-pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+    .cat-bitcoin { background: #f9731618; color: #fb923c; }
+    .cat-ethereum { background: #818cf818; color: #a5b4fc; }
+    .cat-upordown, .cat-15m, .cat-hidefromnew { background: #6366f118; color: #818cf8; }
+    .cat-sports { background: #34d39918; color: #6ee7b7; }
+    .cat-esports { background: #a78bfa18; color: #c4b5fd; }
+    .cat-tennis { background: #34d39918; color: #6ee7b7; }
+    .cat-politics { background: #f8717118; color: #fca5a5; }
+    .cat-crypto { background: #fbbf2418; color: #fcd34d; }
+    .cat-other { background: #37415118; color: #6b7280; }
+
+    .sig-cell { font-weight: 600; white-space: nowrap; }
+    .sig-cell.active { color: #34d399; }
+    .sig-cell.inactive { color: #27272f; }
+
+    .edge-bar { display: inline-flex; align-items: center; gap: 4px; }
+    .edge-fill { height: 6px; border-radius: 3px; min-width: 2px; }
+    .edge-fill.pos { background: #34d399; }
+    .edge-fill.neg { background: #f87171; }
+
+    .price-pair { white-space: nowrap; }
+    .price-yes { color: #34d399; }
+    .price-no { color: #f87171; }
+    .price-sep { color: #27272f; margin: 0 2px; }
+
+    .liq-val { color: #6b7280; }
+    .time-val { color: #6b7280; white-space: nowrap; }
+    .time-val.urgent { color: #fbbf24; }
+    .time-val.imminent { color: #f87171; }
+
+    /* ── Single-market mode (legacy fallback) ── */
+    #singleMode { display: none; }
+    #singleMode.visible { display: block; }
+    #singleMode .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 16px 28px; }
+    @media (max-width: 900px) { #singleMode .grid { grid-template-columns: 1fr; } }
+    .card { background: #12121a; border: 1px solid #1e1e2a; border-radius: 8px; padding: 16px; }
+    .card-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: #4b5563; margin-bottom: 10px; font-weight: 600; }
     .signal-box { text-align: center; padding: 20px; }
-    .signal-text { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
-    .signal-text.buy-up { color: #00ff88; }
-    .signal-text.buy-down { color: #ff4444; }
-    .signal-text.no-trade { color: #666; }
-    .rec-detail { font-size: 13px; color: #888; }
-    .kv-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1a1a22; }
+    .signal-text { font-size: 28px; font-weight: 700; margin-bottom: 6px; }
+    .signal-text.buy-up { color: #34d399; }
+    .signal-text.buy-down { color: #f87171; }
+    .signal-text.no-trade-text { color: #374151; }
+    .rec-detail { font-size: 12px; color: #6b7280; }
+    .kv-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #141420; }
     .kv-row:last-child { border-bottom: none; }
-    .kv-label { color: #777; font-size: 13px; }
-    .kv-value { font-size: 13px; font-weight: 500; }
-    .green { color: #00ff88; }
-    .red { color: #ff4444; }
-    .yellow { color: #ffaa00; }
-    .gray { color: #555; }
-    .chart-container { height: 160px; position: relative; }
-    .prob-bar { display: flex; height: 28px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
-    .prob-up { background: #00ff8833; color: #00ff88; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
-    .prob-down { background: #ff444433; color: #ff4444; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+    .kv-label { color: #4b5563; font-size: 12px; }
+    .kv-value { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+    .green { color: #34d399; }
+    .red { color: #f87171; }
+    .prob-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+    .prob-up { background: #34d39920; color: #34d399; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+    .prob-down { background: #f8717120; color: #f87171; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+    .chart-container { height: 150px; position: relative; }
     .wide { grid-column: 1 / -1; }
+
+    @media (max-width: 700px) {
+      .summary-strip { flex-wrap: wrap; }
+      .signal-grid { grid-template-columns: 1fr; }
+      .table-wrap { overflow-x: auto; }
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>BTC 15m Polymarket</h1>
-    <div class="status">
-      <div class="dot" id="statusDot"></div>
-      <span id="statusText">Connecting...</span>
+
+<!-- ── Header ── -->
+<div class="header">
+  <div class="header-left">
+    <h1>PolySignal</h1>
+    <div class="conn-badge">
+      <div class="conn-dot" id="statusDot"></div>
+      <span id="statusText">Connecting</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/pricing.html" class="header-link">Pricing</a>
+  </div>
+</div>
+
+<!-- ═══════ SCANNER MODE ═══════ -->
+<div id="scannerMode">
+
+  <!-- Summary strip -->
+  <div class="summary-strip">
+    <div class="summary-item">Tracking <span class="summary-val" id="statTracked">0</span> markets</div>
+    <div class="summary-item">Active signals <span class="summary-val highlight" id="statSignals">0</span></div>
+    <div class="summary-item">Last scan <span class="summary-val" id="statUpdated">--:--:--</span></div>
+  </div>
+
+  <!-- Signals -->
+  <div class="signals-panel">
+    <div class="section-header">
+      <span class="section-title">Actionable Signals</span>
+      <span class="signal-count-badge zero" id="sigCountBadge">0</span>
+    </div>
+
+    <div class="signal-explainer">
+      <strong>How to read signals:</strong>
+      A signal fires when our model believes a Polymarket outcome is mispriced.
+      <strong>BUY YES</strong> = the model thinks YES will happen but the market price is too low — buy YES shares.
+      <strong>BUY NO</strong> = the model thinks NO will happen but the market price is too low — buy NO shares.
+      <strong>Edge</strong> = how much the model's probability exceeds the market price (bigger = stronger conviction).
+      <strong>Strength:</strong> STRONG (high edge + multiple indicators agree) / GOOD (solid edge, some confirmation).
+    </div>
+
+    <div id="signalCards">
+      <div class="no-signals-box" id="noSignals">
+        <div class="icon">~</div>
+        <p><strong>Scanning markets...</strong><br>Signals appear when the model detects a mispriced outcome.</p>
+      </div>
     </div>
   </div>
 
+  <!-- Category filter -->
+  <div class="filter-bar" id="filterBar">
+    <button class="fbtn active" data-cat="all">All</button>
+  </div>
+
+  <!-- Markets table -->
+  <div class="table-section">
+    <div class="section-header">
+      <span class="section-title">All Tracked Markets</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:220px">Market</th>
+            <th>Category</th>
+            <th>Signal</th>
+            <th>Model&nbsp;Prob</th>
+            <th>Market&nbsp;Price</th>
+            <th>Edge</th>
+            <th>RSI</th>
+            <th>Time Left</th>
+            <th>Liquidity</th>
+          </tr>
+        </thead>
+        <tbody id="marketsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ SINGLE-MARKET MODE (legacy) ═══════ -->
+<div id="singleMode">
   <div class="grid">
     <div class="card signal-box">
       <div class="card-title">Signal</div>
-      <div class="signal-text no-trade" id="signalText">-</div>
+      <div class="signal-text no-trade-text" id="signalText">-</div>
       <div class="rec-detail" id="recDetail">-</div>
     </div>
-
     <div class="card">
       <div class="card-title">Model Probability</div>
       <div class="prob-bar">
-        <div class="prob-up" id="probUp" style="width:50%">UP 50%</div>
-        <div class="prob-down" id="probDown" style="width:50%">DOWN 50%</div>
+        <div class="prob-up" id="probUp" style="width:50%">YES 50%</div>
+        <div class="prob-down" id="probDown" style="width:50%">NO 50%</div>
       </div>
-      <div style="margin-top:12px">
-        <div class="kv-row"><span class="kv-label">Edge UP</span><span class="kv-value" id="edgeUp">-</span></div>
-        <div class="kv-row"><span class="kv-label">Edge DOWN</span><span class="kv-value" id="edgeDown">-</span></div>
+      <div style="margin-top:10px">
+        <div class="kv-row"><span class="kv-label">Edge YES</span><span class="kv-value" id="edgeUp">-</span></div>
+        <div class="kv-row"><span class="kv-label">Edge NO</span><span class="kv-value" id="edgeDown">-</span></div>
         <div class="kv-row"><span class="kv-label">Regime</span><span class="kv-value" id="regime">-</span></div>
       </div>
     </div>
-
     <div class="card">
       <div class="card-title">Prices</div>
       <div class="kv-row"><span class="kv-label">BTC (Binance)</span><span class="kv-value" id="btcPrice">-</span></div>
@@ -75,7 +263,6 @@
       <div class="kv-row"><span class="kv-label">Price to Beat</span><span class="kv-value" id="priceToBeat">-</span></div>
       <div class="kv-row"><span class="kv-label">Delta 1m / 3m</span><span class="kv-value" id="deltas">-</span></div>
     </div>
-
     <div class="card">
       <div class="card-title">Indicators</div>
       <div class="kv-row"><span class="kv-label">VWAP</span><span class="kv-value" id="vwap">-</span></div>
@@ -84,31 +271,29 @@
       <div class="kv-row"><span class="kv-label">Heiken Ashi</span><span class="kv-value" id="heiken">-</span></div>
       <div class="kv-row"><span class="kv-label">Time Left</span><span class="kv-value" id="timeLeft">-</span></div>
     </div>
-
     <div class="card">
       <div class="card-title">Polymarket</div>
       <div class="kv-row"><span class="kv-label">Market</span><span class="kv-value" id="marketSlug">-</span></div>
-      <div class="kv-row"><span class="kv-label">UP Price</span><span class="kv-value green" id="mktUp">-</span></div>
-      <div class="kv-row"><span class="kv-label">DOWN Price</span><span class="kv-value red" id="mktDown">-</span></div>
+      <div class="kv-row"><span class="kv-label">YES Price</span><span class="kv-value green" id="mktUp">-</span></div>
+      <div class="kv-row"><span class="kv-label">NO Price</span><span class="kv-value red" id="mktDown">-</span></div>
       <div class="kv-row"><span class="kv-label">Liquidity</span><span class="kv-value" id="liquidity">-</span></div>
     </div>
-
     <div class="card wide">
       <div class="card-title">BTC Price (last 60 ticks)</div>
       <div class="chart-container"><canvas id="priceChart"></canvas></div>
     </div>
-
     <div class="card">
       <div class="card-title">RSI (last 60 ticks)</div>
       <div class="chart-container"><canvas id="rsiChart"></canvas></div>
     </div>
-
     <div class="card">
       <div class="card-title">Model Probability (last 60 ticks)</div>
       <div class="chart-container"><canvas id="probChart"></canvas></div>
     </div>
   </div>
+</div>
 
-  <script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

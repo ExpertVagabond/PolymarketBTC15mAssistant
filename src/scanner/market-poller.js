@@ -140,15 +140,21 @@ export function createMarketPoller(market) {
       ? closes[closes.length - 1] < vwapNow && closes[closes.length - 2] > vwapSeries[vwapSeries.length - 2]
       : false;
 
+    // Orderbook imbalance (bid volume / ask volume for YES token)
+    const obUp = snapshot.ok ? snapshot.orderbook?.up : null;
+    const orderbookImbalance = obUp?.bidLiquidity && obUp?.askLiquidity && obUp.askLiquidity > 0
+      ? obUp.bidLiquidity / obUp.askLiquidity
+      : null;
+
     // Engines
     const regimeInfo = detectRegime({ price: lastPrice, vwap: vwapNow, vwapSlope, vwapCrossCount, volumeRecent, volumeAvg });
-    const scored = scoreDirection({ price: lastPrice, vwap: vwapNow, vwapSlope, rsi: rsiNow, rsiSlope, macd, heikenColor: consec.color, heikenCount: consec.count, failedVwapReclaim });
+    const scored = scoreDirection({ price: lastPrice, vwap: vwapNow, vwapSlope, rsi: rsiNow, rsiSlope, macd, heikenColor: consec.color, heikenCount: consec.count, failedVwapReclaim, orderbookImbalance });
     const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, CONFIG.candleWindowMinutes);
 
     const marketUp = snapshot.ok ? snapshot.prices.up : null;
     const marketDown = snapshot.ok ? snapshot.prices.down : null;
     const edge = computeEdge({ modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown, marketYes: marketUp, marketNo: marketDown });
-    const rec = decide({ remainingMinutes: timeLeftMin, edgeUp: edge.edgeUp, edgeDown: edge.edgeDown, modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown });
+    const rec = decide({ remainingMinutes: timeLeftMin, edgeUp: edge.edgeUp, edgeDown: edge.edgeDown, modelUp: timeAware.adjustedUp, modelDown: timeAware.adjustedDown, regime: regimeInfo.regime, category: market.category });
 
     const signal = rec.action === "ENTER" ? (rec.side === "UP" ? "BUY YES" : "BUY NO") : "NO TRADE";
 
@@ -165,6 +171,7 @@ export function createMarketPoller(market) {
       rec,
       regimeInfo,
       edge,
+      orderbookImbalance,
       prices: { last: lastPrice, up: marketUp, down: marketDown },
       indicators: {
         vwap: vwapNow, vwapSlope, vwapDist,

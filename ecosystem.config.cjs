@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: "polymarket-bot",
+    name: "polysignal",
     script: "src/server.js",
     env_production: {
       NODE_ENV: "production"
