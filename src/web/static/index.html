@@ -183,6 +183,45 @@
     .sig-meta { display: flex; gap: 12px; font-size: 10px; color: #4b5563; margin-top: 8px; flex-wrap: wrap; }
     .sig-meta-item em { color: #9ca3af; font-style: normal; font-weight: 500; }
 
+    /* ── Signal detail modal ── */
+    .modal-overlay { position: fixed; inset: 0; background: #00000080; z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+    .modal { background: #12121a; border: 1px solid #2a2a36; border-radius: 12px; width: 90%; max-width: 560px; max-height: 85vh; overflow-y: auto; padding: 24px; }
+    .modal-close { float: right; background: none; border: none; color: #4b5563; font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; }
+    .modal-close:hover { color: #e5e7eb; }
+    .modal h3 { font-size: 15px; color: #fff; font-weight: 700; margin-bottom: 4px; }
+    .modal .modal-sub { font-size: 11px; color: #6b7280; margin-bottom: 16px; }
+    .modal-section { margin-bottom: 16px; }
+    .modal-section-title { font-size: 10px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+    .breakdown-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .breakdown-label { font-size: 11px; color: #9ca3af; width: 110px; flex-shrink: 0; }
+    .breakdown-bar { flex: 1; height: 6px; background: #1a1a24; border-radius: 3px; overflow: hidden; }
+    .breakdown-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+    .breakdown-fill.green { background: #34d399; }
+    .breakdown-fill.blue { background: #60a5fa; }
+    .breakdown-fill.amber { background: #fbbf24; }
+    .breakdown-fill.red { background: #f87171; }
+    .breakdown-val { font-size: 11px; color: #e5e7eb; font-weight: 600; width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+    .modal-kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #141420; font-size: 12px; }
+    .modal-kv:last-child { border-bottom: none; }
+    .modal-kv .k { color: #4b5563; }
+    .modal-kv .v { color: #e5e7eb; font-weight: 500; }
+
+    /* ── Tab buttons ── */
+    .tab-btn { background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; color: #6b7280; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .tab-btn:hover { color: #a5b4fc; border-color: #3b82f630; }
+    .tab-btn.active { background: #3b82f618; border-color: #3b82f6; color: #60a5fa; }
+
+    /* ── Analytics panel ── */
+    .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 20px 28px; }
+    .analytics-card { background: #12121a; border: 1px solid #1e1e2a; border-radius: 10px; padding: 16px 18px; }
+    .analytics-card.wide { grid-column: 1 / -1; }
+    .analytics-title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px; }
+    .analytics-chart { height: 220px; position: relative; }
+    .analytics-card.wide .analytics-chart { height: 260px; }
+
+    @media (max-width: 800px) { .analytics-grid { grid-template-columns: 1fr; } .analytics-card.wide { grid-column: 1; } }
+
     /* ── Single-market mode (legacy fallback) ── */
     #singleMode { display: none; }
     #singleMode.visible { display: block; }
@@ -227,6 +266,8 @@
     </div>
   </div>
   <div class="header-right">
+    <button class="tab-btn active" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab-btn" id="tabAnalytics" onclick="switchTab('analytics')">Analytics</button>
     <a href="/terms.html" class="header-link">Terms</a>
     <a href="/privacy.html" class="header-link">Privacy</a>
   </div>
@@ -301,6 +342,68 @@
   </div>
 </div>
 
+<!-- ═══════ ANALYTICS MODE ═══════ -->
+<div id="analyticsMode" style="display:none">
+
+  <!-- KPI strip -->
+  <div class="summary-strip">
+    <div class="summary-item">Win Rate <span class="summary-val highlight" id="kpiWinRate">-</span></div>
+    <div class="summary-item">Total P&L <span class="summary-val" id="kpiTotalPnl">-</span></div>
+    <div class="summary-item">Settled <span class="summary-val" id="kpiSettled">-</span></div>
+    <div class="summary-item">Max Drawdown <span class="summary-val" id="kpiDrawdown">-</span></div>
+    <div class="summary-item">Streak <span class="summary-val" id="kpiStreak">-</span></div>
+    <div class="summary-item">Avg Confidence <span class="summary-val" id="kpiAvgConf">-</span></div>
+  </div>
+
+  <!-- Charts grid -->
+  <div class="analytics-grid">
+    <div class="analytics-card wide">
+      <div class="analytics-title">Equity Curve (Cumulative P&L)</div>
+      <div class="analytics-chart"><canvas id="equityChart"></canvas></div>
+    </div>
+    <div class="analytics-card">
+      <div class="analytics-title">Daily Win Rate</div>
+      <div class="analytics-chart"><canvas id="winRateChart"></canvas></div>
+    </div>
+    <div class="analytics-card">
+      <div class="analytics-title">Performance by Category</div>
+      <div class="analytics-chart"><canvas id="categoryChart"></canvas></div>
+    </div>
+    <div class="analytics-card">
+      <div class="analytics-title">Confidence Calibration</div>
+      <div class="analytics-chart"><canvas id="calibrationChart"></canvas></div>
+    </div>
+    <div class="analytics-card">
+      <div class="analytics-title">Daily Signals Volume</div>
+      <div class="analytics-chart"><canvas id="volumeChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Recent settled signals -->
+  <div class="table-section">
+    <div class="section-header">
+      <span class="section-title">Recent Settled Signals</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:180px">Market</th>
+            <th>Side</th>
+            <th>Outcome</th>
+            <th>Edge</th>
+            <th>Conf</th>
+            <th>Kelly</th>
+            <th>P&L</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="settledBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════ SINGLE-MARKET MODE (legacy) ═══════ -->
 <div id="singleMode">
   <div class="grid">
@@ -356,6 +459,11 @@
       <div class="chart-container"><canvas id="probChart"></canvas></div>
     </div>
   </div>
+</div>
+
+<!-- Signal detail modal -->
+<div class="modal-overlay" id="signalModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="signalModalContent"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>

@@ -438,6 +438,225 @@ export function getComboWinRates(minSamples = 10) {
   `).all(minSamples);
 }
 
+/* ── Analytics queries ── */
+
+/**
+ * Time-series stats: daily bucketed win/loss/winrate/pnl.
+ * @param {number} days - lookback period (default 7)
+ */
+export function getTimeSeries(days = 7) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  return db.prepare(`
+    SELECT
+      DATE(created_at) as date,
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN outcome IS NULL AND signal != 'NO TRADE' THEN 1 ELSE 0 END) as pending,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as win_rate,
+      AVG(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as avg_pnl,
+      SUM(CASE WHEN outcome IS NOT NULL THEN pnl_pct ELSE 0 END) as total_pnl,
+      AVG(edge) as avg_edge,
+      AVG(confidence) as avg_confidence
+    FROM signal_history
+    WHERE signal != 'NO TRADE'
+      AND created_at >= datetime('now', ?)
+    GROUP BY DATE(created_at)
+    ORDER BY date ASC
+  `).all(`-${days} days`);
+}
+
+/**
+ * Confidence calibration: bucket confidence scores vs actual win rates.
+ * Returns [{bucket, range, total, wins, losses, actual_win_rate, expected_mid}]
+ */
+export function getCalibration() {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  return db.prepare(`
+    SELECT
+      CASE
+        WHEN confidence >= 80 THEN '80-100'
+        WHEN confidence >= 60 THEN '60-79'
+        WHEN confidence >= 40 THEN '40-59'
+        WHEN confidence >= 20 THEN '20-39'
+        ELSE '0-19'
+      END as bucket,
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as actual_win_rate,
+      AVG(confidence) as avg_confidence,
+      AVG(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as avg_pnl
+    FROM signal_history
+    WHERE signal != 'NO TRADE'
+      AND confidence IS NOT NULL
+      AND outcome IS NOT NULL
+    GROUP BY bucket
+    ORDER BY avg_confidence DESC
+  `).all();
+}
+
+/**
+ * Drawdown analysis: max drawdown, consecutive losses, streaks.
+ */
+export function getDrawdownStats() {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  const settled = db.prepare(`
+    SELECT outcome, pnl_pct, created_at, settled_at, question, category, confidence
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    ORDER BY created_at ASC
+  `).all();
+
+  if (settled.length === 0) {
+    return { maxDrawdown: 0, maxConsecutiveLosses: 0, maxConsecutiveWins: 0, currentStreak: { type: null, count: 0 }, equityCurve: [] };
+  }
+
+  let cumPnl = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+  let maxConsecutiveLosses = 0;
+  let maxConsecutiveWins = 0;
+  let currentLossStreak = 0;
+  let currentWinStreak = 0;
+  const equityCurve = [];
+
+  for (const row of settled) {
+    cumPnl += row.pnl_pct || 0;
+    if (cumPnl > peak) peak = cumPnl;
+    const dd = peak - cumPnl;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+
+    if (row.outcome === "WIN") {
+      currentWinStreak++;
+      currentLossStreak = 0;
+      if (currentWinStreak > maxConsecutiveWins) maxConsecutiveWins = currentWinStreak;
+    } else {
+      currentLossStreak++;
+      currentWinStreak = 0;
+      if (currentLossStreak > maxConsecutiveLosses) maxConsecutiveLosses = currentLossStreak;
+    }
+
+    equityCurve.push({
+      date: row.created_at,
+      cumPnl: Math.round(cumPnl * 100) / 100,
+      drawdown: Math.round(dd * 100) / 100
+    });
+  }
+
+  const lastOutcome = settled[settled.length - 1].outcome;
+  const currentStreak = {
+    type: lastOutcome,
+    count: lastOutcome === "WIN" ? currentWinStreak : currentLossStreak
+  };
+
+  return { maxDrawdown: Math.round(maxDrawdown * 100) / 100, maxConsecutiveLosses, maxConsecutiveWins, currentStreak, totalSettled: settled.length, equityCurve };
+}
+
+/**
+ * Export signals as flat objects suitable for CSV.
+ * @param {object} opts - { limit, days, category }
+ */
+export function exportSignals(opts = {}) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  let where = "signal != 'NO TRADE'";
+  const params = {};
+
+  if (opts.days) {
+    where += " AND created_at >= datetime('now', @daysAgo)";
+    params.daysAgo = `-${opts.days} days`;
+  }
+  if (opts.category) {
+    where += " AND category = @category";
+    params.category = opts.category;
+  }
+
+  const limit = Math.min(opts.limit || 1000, 5000);
+
+  return db.prepare(`
+    SELECT
+      id, market_id, question, category, signal, side, strength, regime,
+      model_up, model_down, market_yes, market_no, edge, rsi,
+      orderbook_imbalance, settlement_left_min, liquidity,
+      confidence, confidence_tier, kelly_bet_pct, kelly_sizing_tier,
+      flow_aligned_score, flow_quality, vol_regime,
+      outcome, pnl_pct, created_at, settled_at
+    FROM signal_history
+    WHERE ${where}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `).all(params);
+}
+
+/**
+ * Per-market performance stats.
+ */
+export function getMarketStats(marketId) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  return db.prepare(`
+    SELECT
+      market_id,
+      question,
+      category,
+      COUNT(*) as total_signals,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) as pending,
+      ROUND(CAST(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS REAL) /
+        NULLIF(SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END), 0) * 100, 1) as win_rate,
+      AVG(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as avg_pnl,
+      SUM(CASE WHEN outcome IS NOT NULL THEN pnl_pct ELSE 0 END) as total_pnl,
+      AVG(edge) as avg_edge,
+      AVG(confidence) as avg_confidence,
+      MIN(created_at) as first_signal,
+      MAX(created_at) as last_signal
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND market_id = ?
+    GROUP BY market_id
+  `).get(marketId);
+}
+
+/**
+ * Performance summary for bots: 7-day P&L, streak, best/worst trade.
+ */
+export function getPerformanceSummary(days = 7) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  const stats = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN outcome IS NOT NULL THEN pnl_pct ELSE 0 END) as total_pnl,
+      MAX(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as best_trade,
+      MIN(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as worst_trade,
+      AVG(CASE WHEN outcome IS NOT NULL THEN pnl_pct END) as avg_pnl,
+      AVG(confidence) as avg_confidence
+    FROM signal_history
+    WHERE signal != 'NO TRADE'
+      AND created_at >= datetime('now', ?)
+  `).get(`-${days} days`);
+
+  const winRate = stats.wins + stats.losses > 0
+    ? (stats.wins / (stats.wins + stats.losses) * 100).toFixed(1)
+    : null;
+
+  return { ...stats, winRate, days };
+}
+
 /**
  * Initialize the signal history table.
  */

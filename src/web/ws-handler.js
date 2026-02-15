@@ -118,6 +118,7 @@ export function broadcastScannerState({ state, signals, stats }) {
       correlation: s.correlation ?? null,
       confidence: s.confidence ?? null,
       confidenceTier: s.confidenceTier ?? null,
+      confidenceBreakdown: s.confidenceBreakdown ?? null,
       orderFlow: s.orderFlow ?? null,
       kelly: s.kelly ?? null
     })),

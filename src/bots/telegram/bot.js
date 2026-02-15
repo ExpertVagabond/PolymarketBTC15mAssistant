@@ -6,6 +6,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import { getByTelegramId, linkTelegram, getByEmail, isPaid, isPro } from "../../subscribers/manager.js";
 import { createCheckoutUrl } from "../../subscribers/stripe-webhook.js";
+import { getSignalStats, getPerformanceSummary } from "../../signals/history.js";
 
 let bot = null;
 let orchestrator = null;
@@ -36,6 +37,8 @@ export function startTelegramBot(opts = {}) {
   bot.onText(/\/markets/, handleMarkets);
   bot.onText(/\/help/, handleHelp);
   bot.onText(/\/link (.+)/, handleLink);
+  bot.onText(/\/winrate/, handleWinRate);
+  bot.onText(/\/performance/, handlePerformance);
 
   console.log("[telegram] Bot started, polling for messages");
   return bot;
@@ -152,10 +155,15 @@ async function handleSignals(msg) {
     const s = signals[i];
     const side = s.rec.side === "UP" ? "YES" : "NO";
     const emoji = s.rec.strength === "STRONG" ? "🔴" : "🟡";
+    const bestEdge = s.rec.side === "UP" ? s.edge?.edgeUp : s.edge?.edgeDown;
+    const confStr = s.confidence != null ? ` | Conf: ${s.confidence}/100` : "";
+    const kellyStr = s.kelly?.betPct != null ? ` | Kelly: ${(s.kelly.betPct * 100).toFixed(1)}%` : "";
+    const flowStr = s.orderFlow?.pressureLabel && s.orderFlow.pressureLabel !== "NEUTRAL"
+      ? ` | Flow: ${s.orderFlow.pressureLabel.replace("_", " ")}` : "";
     lines.push(
       `${emoji} BUY ${side} — ${s.question?.slice(0, 50)}\n` +
-      `Model: ${(s.timeAware.adjustedUp * 100).toFixed(1)}% UP | Edge: ${((s.edge?.edgeUp ?? 0) * 100).toFixed(1)}%\n` +
-      `Strength: ${s.rec.strength} | ${s.category}\n`
+      `Model: ${(s.timeAware.adjustedUp * 100).toFixed(1)}% | Edge: +${((bestEdge ?? 0) * 100).toFixed(1)}%\n` +
+      `${s.rec.strength} | ${s.category}${confStr}${kellyStr}${flowStr}\n`
     );
   }
 
@@ -220,10 +228,49 @@ async function handleLink(msg, match) {
   await bot.sendMessage(chatId, `Linked! Your Telegram is now connected to ${email} (${sub.plan} plan).`);
 }
 
+async function handleWinRate(msg) {
+  const chatId = msg.chat.id;
+  try {
+    const stats = getSignalStats();
+    const lines = [`Signal Win Rates\n`];
+    lines.push(`Overall: ${stats.winRate || "-"}% (${stats.wins}W / ${stats.losses}L)`);
+    lines.push(`Avg P&L: ${stats.avg_pnl != null ? stats.avg_pnl.toFixed(1) + "%" : "-"}\n`);
+
+    if (stats.byCategory?.length) {
+      lines.push("By Category:");
+      for (const cat of stats.byCategory) {
+        const settled = cat.wins + cat.losses;
+        if (settled === 0) continue;
+        const wr = (cat.wins / settled * 100).toFixed(0);
+        lines.push(`  ${cat.category}: ${wr}% (${cat.wins}W/${cat.losses}L)`);
+      }
+    }
+    await bot.sendMessage(chatId, lines.join("\n"));
+  } catch {
+    await bot.sendMessage(chatId, "No stats available yet.");
+  }
+}
+
+async function handlePerformance(msg) {
+  const chatId = msg.chat.id;
+  try {
+    const perf = getPerformanceSummary(7);
+    const lines = [`7-Day Performance\n`];
+    lines.push(`Win Rate: ${perf.winRate || "-"}% (${perf.wins}W / ${perf.losses}L)`);
+    lines.push(`Total P&L: ${perf.total_pnl != null ? (perf.total_pnl >= 0 ? "+" : "") + perf.total_pnl.toFixed(1) + "%" : "-"}`);
+    lines.push(`Best Trade: ${perf.best_trade != null ? "+" + perf.best_trade.toFixed(1) + "%" : "-"}`);
+    lines.push(`Worst Trade: ${perf.worst_trade != null ? perf.worst_trade.toFixed(1) + "%" : "-"}`);
+    lines.push(`Avg Confidence: ${perf.avg_confidence != null ? Math.round(perf.avg_confidence) : "-"}`);
+    await bot.sendMessage(chatId, lines.join("\n"));
+  } catch {
+    await bot.sendMessage(chatId, "No performance data yet.");
+  }
+}
+
 async function handleHelp(msg) {
   const chatId = msg.chat.id;
   await bot.sendMessage(chatId,
-    `Polymarket Signal Bot\n\n` +
+    `PolySignal Bot\n\n` +
     `Scans all active Polymarket markets (crypto, politics, sports, esports, etc.) ` +
     `and sends real-time signals when the model detects an edge.\n\n` +
     `Free: 1 signal at a time, 5-min delay\n` +
@@ -234,6 +281,8 @@ async function handleHelp(msg) {
     `/link email - Connect existing subscription\n` +
     `/signals - Current signals\n` +
     `/markets - What's being tracked\n` +
+    `/winrate - Win rates by category\n` +
+    `/performance - 7-day P&L summary\n` +
     `/status - Your plan info`
   );
 }

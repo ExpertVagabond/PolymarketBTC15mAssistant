@@ -17,8 +17,8 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates } from "../signals/history.js";
-import { getAllWeights } from "../engines/weights.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary } from "../signals/history.js";
+import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -98,6 +98,58 @@ export async function startWebServer(opts = {}) {
     return getSignalStats();
   });
 
+  /* ── Analytics API ── */
+
+  app.get("/api/analytics/timeseries", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+    return getTimeSeries(days);
+  });
+
+  app.get("/api/analytics/calibration", async () => {
+    return getCalibration();
+  });
+
+  app.get("/api/analytics/drawdown", async () => {
+    return getDrawdownStats();
+  });
+
+  app.get("/api/analytics/performance", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+    return getPerformanceSummary(days);
+  });
+
+  app.get("/api/analytics/market/:marketId", async (req) => {
+    const stats = getMarketStats(req.params.marketId);
+    return stats || { error: "no_data", marketId: req.params.marketId };
+  });
+
+  app.get("/api/analytics/export", async (req) => {
+    const opts = {
+      days: req.query.days ? Number(req.query.days) : undefined,
+      category: req.query.category || undefined,
+      limit: Number(req.query.limit) || 1000
+    };
+    const rows = exportSignals(opts);
+    const format = req.query.format || "json";
+
+    if (format === "csv") {
+      if (rows.length === 0) return "no data";
+      const headers = Object.keys(rows[0]);
+      const csvLines = [headers.join(",")];
+      for (const row of rows) {
+        csvLines.push(headers.map((h) => {
+          const val = row[h];
+          if (val == null) return "";
+          const str = String(val);
+          return str.includes(",") || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+        }).join(","));
+      }
+      return { csv: csvLines.join("\n"), count: rows.length };
+    }
+
+    return { signals: rows, count: rows.length };
+  });
+
   /* ── Learning / Feedback API ── */
 
   app.get("/api/learning/weights", async () => {
@@ -110,6 +162,10 @@ export async function startWebServer(opts = {}) {
 
   app.get("/api/learning/combos", async () => {
     return getComboWinRates(5);
+  });
+
+  app.get("/api/learning/status", async () => {
+    return getLearningStatus();
   });
 
   /* ── Auth routes ── */

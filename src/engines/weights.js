@@ -16,6 +16,9 @@ const MIN_SETTLED = 50; // Minimum settled outcomes before learning kicks in
 let cachedWeights = null;
 let lastRefreshMs = 0;
 let refreshTimer = null;
+let modelVersion = 0;
+let weightHistory = []; // track weight changes for audit
+const MAX_HISTORY = 50;
 
 /**
  * Default indicator weights (used when insufficient history).
@@ -55,12 +58,29 @@ function toMultipliers(rawWeights) {
 
 /**
  * Refresh weights from the signal history DB.
+ * Tracks weight changes for audit trail.
  */
 function refresh() {
+  const prev = cachedWeights;
   try {
     const rawWeights = computeDynamicWeights();
     if (rawWeights) {
       cachedWeights = toMultipliers(rawWeights);
+      modelVersion++;
+
+      // Track significant changes
+      if (prev) {
+        const deltas = computeDeltas(prev, cachedWeights);
+        if (deltas.length > 0) {
+          weightHistory.push({
+            version: modelVersion,
+            timestamp: Date.now(),
+            deltas
+          });
+          if (weightHistory.length > MAX_HISTORY) weightHistory.shift();
+          console.log(`[weights] v${modelVersion}: ${deltas.length} weight(s) shifted`);
+        }
+      }
     } else {
       cachedWeights = null; // Not enough data, use defaults
     }
@@ -68,6 +88,24 @@ function refresh() {
     cachedWeights = null; // DB error, use defaults
   }
   lastRefreshMs = Date.now();
+}
+
+/**
+ * Compute deltas between two weight snapshots.
+ * Returns changes > 0.05 (5% shift).
+ */
+function computeDeltas(prev, next) {
+  const deltas = [];
+  for (const [feat, values] of Object.entries(next)) {
+    if (!prev[feat]) continue;
+    for (const [val, weight] of Object.entries(values)) {
+      const prevWeight = prev[feat]?.[val];
+      if (prevWeight != null && Math.abs(weight - prevWeight) > 0.05) {
+        deltas.push({ feature: feat, value: val, from: prevWeight, to: weight, delta: weight - prevWeight });
+      }
+    }
+  }
+  return deltas;
 }
 
 /**
@@ -105,9 +143,35 @@ export function getAllWeights() {
   }
   return {
     source: cachedWeights ? "learned" : "default",
+    modelVersion,
     weights: cachedWeights || DEFAULT_WEIGHTS,
     lastRefresh: lastRefreshMs,
-    nextRefresh: lastRefreshMs + REFRESH_INTERVAL_MS
+    nextRefresh: lastRefreshMs + REFRESH_INTERVAL_MS,
+    recentChanges: weightHistory.slice(-10)
+  };
+}
+
+/**
+ * Get learning status for monitoring.
+ */
+export function getLearningStatus() {
+  if (Date.now() - lastRefreshMs > REFRESH_INTERVAL_MS) {
+    refresh();
+  }
+  return {
+    active: cachedWeights !== null,
+    modelVersion,
+    source: cachedWeights ? "learned" : "default",
+    lastRetrain: lastRefreshMs,
+    nextRetrain: lastRefreshMs + REFRESH_INTERVAL_MS,
+    refreshIntervalMs: REFRESH_INTERVAL_MS,
+    minSettledRequired: MIN_SETTLED,
+    recentChanges: weightHistory.slice(-5).map(h => ({
+      version: h.version,
+      timestamp: h.timestamp,
+      changeCount: h.deltas.length,
+      topChanges: h.deltas.slice(0, 3).map(d => `${d.feature}=${d.value}: ${d.from.toFixed(2)}→${d.to.toFixed(2)}`)
+    }))
   };
 }
 
