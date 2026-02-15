@@ -164,8 +164,14 @@
       <button style="margin-top:8px;padding:4px 12px;font-size:11px;background:#1e1e2a;border:1px solid #2d2d3a;color:#a5b4fc;border-radius:6px;cursor:pointer" onclick="runMaintenance()">Run Now</button>
     </div>
 
+    <!-- Trading Config -->
+    <div class="card">
+      <div class="card-title">Trading Config</div>
+      <div id="configBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Trading Status -->
-    <div class="card wide">
+    <div class="card half">
       <div class="card-title">Trading Bot</div>
       <div id="tradingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
@@ -221,7 +227,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -232,7 +238,9 @@ async function loadAdmin() {
       fetch("/api/admin/perf").then(r => r.json()).catch(() => null),
       fetch("/api/admin/maintenance").then(r => r.json()).catch(() => null),
       fetch("/api/trading/status").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/open").then(r => r.json()).catch(() => [])
+      fetch("/api/trading/open").then(r => r.json()).catch(() => []),
+      fetch("/api/trading/pnl").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/config").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -244,7 +252,8 @@ async function loadAdmin() {
     if (cacheStats) renderCacheStats(cacheStats);
     if (perf) renderPerfStats(perf);
     if (maint) renderMaintenance(maint);
-    if (trading) { trading._openExecutions = openExecs || []; renderTrading(trading); }
+    if (tradingConfig) renderTradingConfig(tradingConfig);
+    if (trading) { trading._openExecutions = openExecs || []; trading._pnl = pnl; renderTrading(trading); }
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -503,6 +512,7 @@ function renderTrading(t) {
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px">
       <div class="kv"><span class="k">Bot State</span><span class="v ${stateColor}">${(c.state || "unknown").toUpperCase()}</span></div>
       <div class="kv"><span class="k">API</span><span class="v ${t.configured ? "green" : "red"}">${t.configured ? "Configured" : "Not Set"}</span></div>
+      <div class="kv"><span class="k">Balance</span><span class="v ${(t.wallet?.balance || 0) > 5 ? "green" : "red"}">$${(t.wallet?.balance || 0).toFixed(2)}</span></div>
       <div class="kv"><span class="k">Circuit</span><span class="v ${cbColor}">${r.circuitBroken ? "BROKEN" : "OK"}</span></div>
       <div class="kv"><span class="k">Monitor</span><span class="v ${m.running ? "green" : "amber"}">${m.running ? "Running" : "Stopped"}</span></div>
     </div>
@@ -534,14 +544,24 @@ function renderTrading(t) {
       }
     }
   }
+  // Unrealized P&L from real-time tracker
+  const pnl = t._pnl;
+  if (pnl && pnl.aggregate) {
+    const a = pnl.aggregate;
+    const upnlColor = a.totalUnrealizedPnl >= 0 ? "green" : "red";
+    html += `<div class="kv"><span class="k">Unrealized P&L</span><span class="v ${upnlColor}">$${a.totalUnrealizedPnl.toFixed(2)} (${a.positionCount} positions)</span></div>`;
+  }
   if (c.reason) html += `<div class="kv"><span class="k">State Reason</span><span class="v" style="color:#6b7280">${esc(c.reason)}</span></div>`;
-  // Show open executions from DB with close buttons
+  // Show open executions from DB with close buttons and live P&L
   const openExecs = t._openExecutions || [];
+  const pnlPositions = pnl?.positions || [];
   if (openExecs.length > 0) {
     html += '<div style="margin-top:10px;font-size:10px;color:#4b5563;font-weight:700">OPEN POSITIONS</div>';
     for (const ex of openExecs) {
+      const pp = pnlPositions.find(p => p.executionId === ex.id);
+      const pnlStr = pp && pp.priceAvailable ? ` | <span style="color:${pp.unrealizedPnlPct >= 0 ? "#34d399" : "#f87171"}">${pp.unrealizedPnlPct >= 0 ? "+" : ""}${pp.unrealizedPnlPct.toFixed(1)}% ($${pp.unrealizedPnlUsd.toFixed(2)})</span>` : "";
       html += `<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#9ca3af;padding:3px 0;border-bottom:1px solid #141420">
-        <span style="flex:1">#${ex.id} ${esc(ex.side)} ${esc(ex.question?.slice(0,40) || ex.market_id?.slice(0,12))} @ ${(ex.entry_price||0).toFixed(3)} ${ex.dry_run ? "[DRY]" : "[LIVE]"}</span>
+        <span style="flex:1">#${ex.id} ${esc(ex.side)} ${esc(ex.question?.slice(0,40) || ex.market_id?.slice(0,12))} @ ${(ex.entry_price||0).toFixed(3)} ${ex.dry_run ? "[DRY]" : "[LIVE]"}${pnlStr}</span>
         <button class="try-btn" style="font-size:9px;padding:1px 6px;border-color:#f87171;color:#f87171" onclick="closePosition(${ex.id})">Close</button>
       </div>`;
     }
@@ -584,6 +604,62 @@ async function liquidateAll() {
     const data = await res.json();
     if (data.ok) { alert("Cancelled " + data.cancelled + " positions. Bot paused."); loadAdmin(); }
     else alert(data.error || "Failed");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+const CONFIG_LABELS = {
+  max_bet_usd: "Max Bet ($)",
+  daily_loss_limit_usd: "Daily Loss Limit ($)",
+  max_open_positions: "Max Positions",
+  take_profit_pct: "Take Profit (%)",
+  stop_loss_pct: "Stop Loss (%)",
+  max_total_exposure_usd: "Max Exposure ($)",
+  max_category_concentration_pct: "Max Category (%)",
+  max_slippage_pct: "Max Slippage (%)",
+  min_balance_usd: "Min Balance ($)"
+};
+
+function renderTradingConfig(cfg) {
+  const el = $("configBlock");
+  if (!el) return;
+  let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+  for (const [key, meta] of Object.entries(cfg)) {
+    const label = CONFIG_LABELS[key] || key;
+    const custom = meta.isCustom ? ' style="color:#c084fc"' : '';
+    html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <span style="color:#6b7280;width:110px;flex-shrink:0">${esc(label)}</span>
+      <input type="number" id="cfg_${key}" value="${meta.value}" min="${meta.min}" max="${meta.max}" step="any"
+        style="width:70px;background:#0e0e16;border:1px solid #1e1e2a;border-radius:4px;padding:3px 6px;color:#e5e7eb;font-size:11px;font-family:inherit;text-align:right"${custom}>
+      <span style="color:#27272f;font-size:9px">${meta.min}-${meta.max}</span>
+    </div>`;
+  }
+  html += '</div>';
+  html += '<button class="try-btn" style="margin-top:8px" onclick="saveConfig()">Save Config</button>';
+  html += '<div id="configResult" style="font-size:10px;margin-top:4px;display:none"></div>';
+  el.innerHTML = html;
+}
+
+async function saveConfig() {
+  const updates = {};
+  for (const key of Object.keys(CONFIG_LABELS)) {
+    const input = $("cfg_" + key);
+    if (input) updates[key] = Number(input.value);
+  }
+  try {
+    const res = await fetch("/api/trading/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates)
+    });
+    const data = await res.json();
+    const el = $("configResult");
+    if (data.ok) {
+      el.textContent = "Saved"; el.style.color = "#34d399"; el.style.display = "block";
+      setTimeout(() => { el.style.display = "none"; }, 3000);
+    } else {
+      el.textContent = "Errors: " + (data.errors || []).map(e => e.key + ": " + e.error).join(", ");
+      el.style.color = "#f87171"; el.style.display = "block";
+    }
   } catch (err) { alert("Error: " + err.message); }
 }
 

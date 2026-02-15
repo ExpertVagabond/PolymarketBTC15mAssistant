@@ -274,7 +274,10 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/audit?days=7&limit=100", desc: "Query trade audit log with filters", tryable: true },
     { method: "GET", path: "/api/trading/audit/summary?days=7", desc: "Audit event counts by type", tryable: true },
     { method: "GET", path: "/api/trading/audit/execution/:id", desc: "Full audit trail for a specific execution", tryable: false },
-    { method: "GET", path: "/api/trading/reconcile", desc: "Position reconciliation — detect stale/orphaned positions (auth required)" }
+    { method: "GET", path: "/api/trading/reconcile", desc: "Position reconciliation — detect stale/orphaned positions (auth required)" },
+    { method: "GET", path: "/api/trading/pnl", desc: "Real-time unrealized P&L for all open positions", tryable: true },
+    { method: "GET", path: "/api/trading/config", desc: "Current trading config values with metadata", tryable: true },
+    { method: "POST", path: "/api/trading/config", desc: "Update trading config: { max_bet_usd, daily_loss_limit_usd, ... } (auth required)" }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

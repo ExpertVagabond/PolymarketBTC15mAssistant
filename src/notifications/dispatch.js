@@ -301,3 +301,68 @@ function formatSignalPayload(tick) {
     }
   };
 }
+
+/**
+ * Dispatch trade event notifications to all active webhooks.
+ * Called by the audit log hook when trade events occur.
+ *
+ * @param {string} eventType - e.g. "trade.opened", "trade.closed", "risk.circuit_breaker"
+ * @param {object} data - Event data (executionId, marketId, side, amount, pnlUsd, etc.)
+ */
+export async function dispatchTradeEvent(eventType, data = {}) {
+  if (!stmts) ensureTable();
+  const webhooks = stmts.activeWebhooks.all();
+  if (webhooks.length === 0) return;
+
+  const payload = {
+    event: eventType,
+    timestamp: new Date().toISOString(),
+    data: {
+      executionId: data.executionId || null,
+      marketId: data.marketId || null,
+      question: data.question || null,
+      side: data.side || null,
+      category: data.category || null,
+      amount: data.amount || null,
+      price: data.price || null,
+      pnlUsd: data.pnlUsd || null,
+      pnlPct: data.pnlPct || null,
+      closeReason: data.closeReason || null,
+      dryRun: data.dryRun != null ? data.dryRun : true,
+      detail: data.detail || null
+    }
+  };
+
+  for (const wh of webhooks) {
+    enqueueWebhook(wh.id, wh.url, payload);
+  }
+}
+
+// Trade events that trigger notifications
+const NOTIFY_EVENTS = new Set([
+  "POSITION_OPENED", "POSITION_CLOSED", "ORDER_FILLED", "ORDER_FILL_FAILED",
+  "ORDER_REJECTED", "CIRCUIT_BREAKER", "BOT_STATE_CHANGE"
+]);
+
+// Map audit event types to webhook event names
+const EVENT_MAP = {
+  "POSITION_OPENED": "trade.opened",
+  "POSITION_CLOSED": "trade.closed",
+  "ORDER_FILLED": "trade.filled",
+  "ORDER_FILL_FAILED": "trade.fill_failed",
+  "ORDER_REJECTED": "trade.rejected",
+  "ORDER_PARTIAL_FILL": "trade.partial_fill",
+  "CIRCUIT_BREAKER": "risk.circuit_breaker",
+  "BOT_STATE_CHANGE": "bot.state_change",
+  "RISK_BLOCKED": "risk.blocked"
+};
+
+/**
+ * Hook for audit-log integration.
+ * Call this from logAuditEvent to auto-dispatch trade notifications.
+ */
+export function onTradeAuditEvent(auditEventType, data) {
+  if (!NOTIFY_EVENTS.has(auditEventType)) return;
+  const webhookEvent = EVENT_MAP[auditEventType] || `trade.${auditEventType.toLowerCase()}`;
+  dispatchTradeEvent(webhookEvent, data).catch(() => {});
+}

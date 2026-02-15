@@ -11,9 +11,10 @@ import { canTrade, getBetSize, recordTradeOpen, recordTradeClose, getRiskStatus,
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
-import { placeMarketOrder, placeSellOrder, checkLiquidity } from "./clob-orders.js";
+import { placeMarketOrder, placeSellOrder, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
-import { logExecution, getOpenCount } from "./execution-log.js";
+import { logExecution, getOpenCount, failExecution } from "./execution-log.js";
+import { logAuditEvent } from "./audit-log.js";
 import { applyGlobalProxyFromEnv } from "../net/proxy.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
@@ -164,10 +165,35 @@ export async function startTradingBot() {
       });
 
       if (result.ok) {
-        registerTrade({ signalId: Date.now(), marketId: state.marketId || "", tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
-        recordTradeOpen();
+        const orderId = result.data?.orderID || result.data?.id || null;
+        logAuditEvent("ORDER_PLACED", { executionId: execId, marketId: state.marketId, tokenId, side: rec.side, category, amount: betSize, price: result.orderPrice, dryRun: false });
         console.log(`  -> ORDER PLACED (exec #${execId}): ${JSON.stringify(result.data)}`);
+
+        // Poll for fill (background)
+        if (orderId) {
+          pollOrderFill(orderId).then(fill => {
+            if (fill.fillStatus === "filled" || fill.fillStatus === "partial") {
+              const fillPrice = fill.avgFillPrice || result.orderPrice;
+              const fillSize = fill.filledSize || betSize;
+              registerTrade({ signalId: Date.now(), marketId: state.marketId || "", tokenId, side: rec.side, entryPrice: fillPrice, betSize: fillSize, dryRun: false, executionId: execId });
+              recordTradeOpen();
+              logAuditEvent("ORDER_FILLED", { executionId: execId, amount: fillSize, price: fillPrice });
+              console.log(`  -> FILLED (exec #${execId}): ${fillSize} @ ${fillPrice.toFixed(4)}`);
+            } else {
+              failExecution(execId, `fill_${fill.fillStatus}`);
+              logAuditEvent("ORDER_FILL_FAILED", { executionId: execId, detail: fill.fillStatus });
+              console.log(`  -> FILL ${fill.fillStatus.toUpperCase()} (exec #${execId})`);
+            }
+          }).catch(() => {
+            registerTrade({ signalId: Date.now(), marketId: state.marketId || "", tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
+            recordTradeOpen();
+          });
+        } else {
+          registerTrade({ signalId: Date.now(), marketId: state.marketId || "", tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
+          recordTradeOpen();
+        }
       } else {
+        logAuditEvent("ORDER_REJECTED", { executionId: execId, marketId: state.marketId, detail: result.data });
         console.log(`  -> ORDER REJECTED (exec #${execId}): ${result.status} ${JSON.stringify(result.data)}`);
       }
     } catch (err) {

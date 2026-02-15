@@ -5,12 +5,14 @@
  */
 
 import { getDb } from "../subscribers/db.js";
+import { getConfigValue } from "./trading-config.js";
 
-const MAX_BET = Number(process.env.MAX_BET_USD) || 1;
-const DAILY_LOSS_LIMIT = Number(process.env.DAILY_LOSS_LIMIT_USD) || 10;
-const MAX_POSITIONS = Number(process.env.MAX_OPEN_POSITIONS) || 3;
-const MAX_CATEGORY_CONCENTRATION = Number(process.env.MAX_CATEGORY_CONCENTRATION_PCT) || 50; // max % in one category
-const MAX_TOTAL_EXPOSURE = Number(process.env.MAX_TOTAL_EXPOSURE_USD) || 50;
+// Dynamic getters — read from trading-config (SQLite-backed, changeable at runtime)
+function MAX_BET() { return getConfigValue("max_bet_usd"); }
+function DAILY_LOSS_LIMIT() { return getConfigValue("daily_loss_limit_usd"); }
+function MAX_POSITIONS() { return getConfigValue("max_open_positions"); }
+function MAX_CATEGORY_CONCENTRATION() { return getConfigValue("max_category_concentration_pct"); }
+function MAX_TOTAL_EXPOSURE() { return getConfigValue("max_total_exposure_usd"); }
 
 let initialized = false;
 let dailyPnl = 0;
@@ -84,20 +86,20 @@ function checkDayReset() {
 export function canTrade(category = null) {
   checkDayReset();
   if (circuitBroken) return { allowed: false, reason: "circuit_breaker" };
-  if (dailyPnl <= -DAILY_LOSS_LIMIT) return { allowed: false, reason: "daily_loss_limit" };
-  if (openPositions >= MAX_POSITIONS) return { allowed: false, reason: "max_positions" };
+  if (dailyPnl <= -DAILY_LOSS_LIMIT()) return { allowed: false, reason: "daily_loss_limit" };
+  if (openPositions >= MAX_POSITIONS()) return { allowed: false, reason: "max_positions" };
 
   // Check total exposure
   const exposure = getExposure();
-  if (exposure.totalExposure >= MAX_TOTAL_EXPOSURE) {
-    return { allowed: false, reason: `total_exposure_limit ($${exposure.totalExposure.toFixed(2)}/$${MAX_TOTAL_EXPOSURE})` };
+  if (exposure.totalExposure >= MAX_TOTAL_EXPOSURE()) {
+    return { allowed: false, reason: `total_exposure_limit ($${exposure.totalExposure.toFixed(2)}/$${MAX_TOTAL_EXPOSURE()})` };
   }
 
   // Check category concentration
   if (category && exposure.totalExposure > 0) {
     const catExposure = exposure.byCategory[category] || 0;
     const catPct = (catExposure / exposure.totalExposure) * 100;
-    if (catPct >= MAX_CATEGORY_CONCENTRATION && catExposure > 0) {
+    if (catPct >= MAX_CATEGORY_CONCENTRATION() && catExposure > 0) {
       return { allowed: false, reason: `category_concentration (${category}: ${catPct.toFixed(0)}%)` };
     }
   }
@@ -107,7 +109,7 @@ export function canTrade(category = null) {
 
 export function getBetSize(edge) {
   // Simple edge-proportional sizing, capped at MAX_BET
-  return Math.min(MAX_BET, Math.max(0.1, Math.abs(edge) * 10));
+  return Math.min(MAX_BET(), Math.max(0.1, Math.abs(edge) * 10));
 }
 
 export function recordTradeOpen() {
@@ -122,7 +124,7 @@ export function recordTradeClose(pnl) {
   openPositions = Math.max(0, openPositions - 1);
   dailyPnl += pnl;
   totalPnl += pnl;
-  if (dailyPnl <= -DAILY_LOSS_LIMIT) {
+  if (dailyPnl <= -DAILY_LOSS_LIMIT()) {
     circuitBroken = true;
   }
   saveState();
@@ -153,15 +155,16 @@ export function getExposure() {
     }
     // Build concentration warnings
     const warnings = [];
+    const concLimit = MAX_CATEGORY_CONCENTRATION();
     for (const [cat, amt] of Object.entries(byCategory)) {
       const pct = totalExposure > 0 ? (amt / totalExposure) * 100 : 0;
-      if (pct >= MAX_CATEGORY_CONCENTRATION) {
+      if (pct >= concLimit) {
         warnings.push({ category: cat, exposureUsd: amt, concentrationPct: Math.round(pct) });
       }
     }
-    return { totalExposure, maxExposure: MAX_TOTAL_EXPOSURE, byCategory, warnings };
+    return { totalExposure, maxExposure: MAX_TOTAL_EXPOSURE(), byCategory, warnings };
   } catch {
-    return { totalExposure: 0, maxExposure: MAX_TOTAL_EXPOSURE, byCategory: {}, warnings: [] };
+    return { totalExposure: 0, maxExposure: MAX_TOTAL_EXPOSURE(), byCategory: {}, warnings: [] };
   }
 }
 
@@ -170,10 +173,10 @@ export function getRiskStatus() {
   const exposure = getExposure();
   return {
     dailyPnl,
-    dailyLossLimit: DAILY_LOSS_LIMIT,
+    dailyLossLimit: DAILY_LOSS_LIMIT(),
     openPositions,
-    maxPositions: MAX_POSITIONS,
-    maxBet: MAX_BET,
+    maxPositions: MAX_POSITIONS(),
+    maxBet: MAX_BET(),
     circuitBroken,
     totalTrades,
     totalPnl,

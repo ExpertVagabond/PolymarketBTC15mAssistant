@@ -5,6 +5,7 @@
  */
 
 import { getDb } from "../subscribers/db.js";
+import { onTradeAuditEvent } from "../notifications/dispatch.js";
 
 let initialized = false;
 
@@ -60,6 +61,8 @@ export function logAuditEvent(eventType, data = {}) {
       data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : null,
       data.dryRun != null ? (data.dryRun ? 1 : 0) : 1
     );
+    // Dispatch trade notification (non-blocking)
+    try { onTradeAuditEvent(eventType, data); } catch { /* non-fatal */ }
   } catch {
     // Audit logging must never break the trading pipeline
   }

@@ -163,6 +163,85 @@ export async function placeSellOrder({ tokenId, amount, price }) {
 }
 
 /**
+ * Fetch current status of an order from CLOB API.
+ * @returns {{ status, filledSize, avgPrice, remainingSize, ... }}
+ */
+export async function getOrderStatus(orderId) {
+  const path = `/order/${orderId}`;
+  const headers = buildClobHeaders("GET", path);
+  const res = await fetch(`${CLOB_BASE}${path}`, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(5000)
+  });
+  if (!res.ok) return { ok: false, status: res.status };
+  const data = await res.json();
+  return {
+    ok: true,
+    orderId,
+    orderStatus: data.status,          // "live", "matched", "cancelled", "expired"
+    side: data.side,
+    originalSize: Number(data.original_size || data.size || 0),
+    filledSize: Number(data.size_matched || data.matched_size || 0),
+    remainingSize: Number(data.size_remaining || 0),
+    price: Number(data.price || 0),
+    avgFillPrice: Number(data.average_price || data.price || 0),
+    raw: data
+  };
+}
+
+/**
+ * Poll order until it fills, rejects, or times out.
+ * Returns final order state.
+ *
+ * @param {string} orderId
+ * @param {{ pollIntervalMs?: number, maxPollMs?: number }} opts
+ */
+export async function pollOrderFill(orderId, { pollIntervalMs = 5000, maxPollMs = 60000 } = {}) {
+  const startTime = Date.now();
+  let lastStatus = null;
+
+  while (Date.now() - startTime < maxPollMs) {
+    try {
+      lastStatus = await getOrderStatus(orderId);
+
+      if (!lastStatus.ok) {
+        // API error — retry
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
+      const st = lastStatus.orderStatus?.toLowerCase();
+
+      // Terminal states
+      if (st === "matched" || st === "filled") {
+        return { ...lastStatus, fillStatus: "filled" };
+      }
+      if (st === "cancelled" || st === "expired" || st === "rejected") {
+        return { ...lastStatus, fillStatus: "rejected" };
+      }
+
+      // Check partial fill
+      if (lastStatus.filledSize > 0 && lastStatus.remainingSize <= 0) {
+        return { ...lastStatus, fillStatus: "filled" };
+      }
+    } catch {
+      // Network error — retry
+    }
+
+    await sleep(pollIntervalMs);
+  }
+
+  // Timeout — return partial info
+  if (lastStatus && lastStatus.filledSize > 0) {
+    return { ...lastStatus, fillStatus: "partial" };
+  }
+  return { ...(lastStatus || {}), fillStatus: "timeout", orderId };
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/**
  * Cancel an open order by ID.
  */
 export async function cancelOrder({ orderId }) {

@@ -9,9 +9,10 @@ import { canTrade, getBetSize, recordTradeOpen, getRiskStatus } from "./risk-man
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
-import { placeMarketOrder, checkLiquidity } from "./clob-orders.js";
+import { placeMarketOrder, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
-import { logExecution } from "./execution-log.js";
+import { logExecution, failExecution } from "./execution-log.js";
+import { checkBalance, invalidateBalanceCache } from "./wallet.js";
 import { logAuditEvent } from "./audit-log.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
@@ -105,6 +106,18 @@ async function processSignal(tick) {
     return;
   }
 
+  // Pre-trade balance check
+  try {
+    const balCheck = await checkBalance(betSize);
+    if (!balCheck.ok) {
+      logAuditEvent("RISK_BLOCKED", { marketId, side: rec.side, amount: betSize, detail: balCheck.reason });
+      console.log(`  -> BLOCKED: ${balCheck.reason} | Balance: $${(balCheck.balance || 0).toFixed(2)}`);
+      return;
+    }
+  } catch (err) {
+    console.log(`  -> Balance check failed (proceeding): ${err.message}`);
+  }
+
   // Pre-trade liquidity check
   let liquidityResult = null;
   try {
@@ -137,11 +150,48 @@ async function processSignal(tick) {
     });
 
     if (result.ok) {
-      registerTrade({ signalId: Date.now(), marketId, tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
-      recordTradeOpen();
-      tradeCount++;
-      logAuditEvent("POSITION_OPENED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: result.orderPrice, dryRun: false, detail: result.data });
+      const orderId = result.data?.orderID || result.data?.id || null;
+      invalidateBalanceCache();
+      logAuditEvent("ORDER_PLACED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: result.orderPrice, dryRun: false, detail: result.data });
       console.log(`  -> ORDER PLACED (exec #${execId}): ${JSON.stringify(result.data)}`);
+
+      // Poll for fill confirmation (non-blocking — runs in background)
+      if (orderId) {
+        pollOrderFill(orderId, { pollIntervalMs: 5000, maxPollMs: 60000 }).then(fill => {
+          if (fill.fillStatus === "filled") {
+            const fillPrice = fill.avgFillPrice || result.orderPrice;
+            registerTrade({ signalId: Date.now(), marketId, tokenId, side: rec.side, entryPrice: fillPrice, betSize: fill.filledSize || betSize, dryRun: false, executionId: execId });
+            recordTradeOpen();
+            tradeCount++;
+            logAuditEvent("ORDER_FILLED", { executionId: execId, marketId, tokenId, side: rec.side, amount: fill.filledSize || betSize, price: fillPrice, detail: fill });
+            console.log(`  -> ORDER FILLED (exec #${execId}): ${fill.filledSize || betSize} @ ${fillPrice.toFixed(4)}`);
+          } else if (fill.fillStatus === "partial") {
+            registerTrade({ signalId: Date.now(), marketId, tokenId, side: rec.side, entryPrice: fill.avgFillPrice || result.orderPrice, betSize: fill.filledSize, dryRun: false, executionId: execId });
+            recordTradeOpen();
+            tradeCount++;
+            logAuditEvent("ORDER_PARTIAL_FILL", { executionId: execId, marketId, amount: fill.filledSize, detail: fill });
+            console.log(`  -> PARTIAL FILL (exec #${execId}): ${fill.filledSize}/${betSize}`);
+          } else {
+            // Rejected or timeout — mark execution as failed
+            failExecution(execId, `fill_${fill.fillStatus}`);
+            logAuditEvent("ORDER_FILL_FAILED", { executionId: execId, marketId, detail: fill });
+            console.log(`  -> FILL ${fill.fillStatus.toUpperCase()} (exec #${execId})`);
+          }
+        }).catch(err => {
+          // Fill polling error — position may or may not exist
+          logAuditEvent("ORDER_FILL_ERROR", { executionId: execId, detail: err.message });
+          console.warn(`  -> Fill poll error (exec #${execId}): ${err.message}`);
+          // Optimistic: register trade anyway so settlement monitor tracks it
+          registerTrade({ signalId: Date.now(), marketId, tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
+          recordTradeOpen();
+          tradeCount++;
+        });
+      } else {
+        // No orderId returned — can't poll, register optimistically
+        registerTrade({ signalId: Date.now(), marketId, tokenId, side: rec.side, entryPrice: result.orderPrice, betSize, dryRun: false, executionId: execId });
+        recordTradeOpen();
+        tradeCount++;
+      }
     } else {
       logAuditEvent("ORDER_REJECTED", { executionId: execId, marketId, tokenId, side: rec.side, amount: betSize, dryRun: false, detail: result.data });
       console.log(`  -> ORDER REJECTED (exec #${execId}): ${result.status} ${JSON.stringify(result.data)}`);

@@ -51,6 +51,9 @@ import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
 import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions } from "../trading/audit-log.js";
+import { getWalletBalance } from "../trading/wallet.js";
+import { getRealtimePnl } from "../trading/pnl-tracker.js";
+import { getTradingConfig, getTradingConfigDetailed, updateTradingConfig } from "../trading/trading-config.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -732,13 +735,15 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   /* ── Trading Status API ── */
 
   app.get("/api/trading/status", async () => {
+    const wallet = await getWalletBalance().catch(() => ({ ok: false, balance: 0 }));
     return {
       configured: isTradingConfigured(),
       control: getBotControlState(),
       risk: getRiskStatus(),
       monitor: getMonitorStatus(),
       executionStats: getExecutionStats(),
-      scannerTrader: getScannerTraderStats()
+      scannerTrader: getScannerTraderStats(),
+      wallet: { balance: wallet.balance || 0, locked: wallet.locked || 0, ok: wallet.ok }
     };
   });
 
@@ -777,6 +782,10 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     return result;
   });
 
+  app.get("/api/trading/pnl", async () => {
+    return getRealtimePnl();
+  });
+
   app.get("/api/trading/audit", async (req) => {
     const { eventType, marketId, executionId, days, limit, offset } = req.query;
     return queryAuditLog({
@@ -798,6 +807,16 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/reconcile", { preHandler: requireAuth }, async () => {
     return reconcilePositions();
+  });
+
+  app.get("/api/trading/config", async () => {
+    return getTradingConfigDetailed();
+  });
+
+  app.post("/api/trading/config", { preHandler: requireAuth }, async (req) => {
+    const updates = req.body || {};
+    const email = req.sessionUser?.email || "admin";
+    return updateTradingConfig(updates, email);
   });
 
   /* ── API Key Auth (X-API-Key header) ── */
