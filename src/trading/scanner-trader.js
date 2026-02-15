@@ -9,7 +9,7 @@ import { canTrade, getBetSize, getKellyBetSize, recordTradeOpen, getRiskStatus }
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
-import { placeMarketOrder, checkLiquidity, pollOrderFill } from "./clob-orders.js";
+import { placeMarketOrderWithRetry, checkLiquidity, pollOrderFill } from "./clob-orders.js";
 import { registerTrade, startSettlementMonitor } from "./settlement-monitor.js";
 import { logExecution, failExecution, hasOpenPositionOnMarket, isMarketOnCooldown } from "./execution-log.js";
 import { checkBalance, invalidateBalanceCache } from "./wallet.js";
@@ -170,7 +170,7 @@ async function processSignal(tick) {
   }
 
   try {
-    const result = await placeMarketOrder({ tokenId, side: rec.side, amount: betSize });
+    const result = await placeMarketOrderWithRetry({ tokenId, side: rec.side, amount: betSize });
 
     const execId = logExecution({
       signalId: String(Date.now()), marketId, tokenId,

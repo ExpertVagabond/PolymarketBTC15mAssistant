@@ -46,7 +46,7 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats } from "../trading/scanner-trader.js";
@@ -176,6 +176,15 @@ export async function startWebServer(opts = {}) {
 
     app.get("/api/scanner/stats", async () => {
       return orchestrator.getStats();
+    });
+
+    app.get("/api/scanner/health", async () => {
+      return orchestrator.getMarketHealth();
+    });
+
+    app.get("/api/scanner/rotation", async (req) => {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      return orchestrator.getRotationLog(limit);
     });
   }
 
@@ -784,6 +793,10 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/pnl", async () => {
     return getRealtimePnl();
+  });
+
+  app.get("/api/trading/analytics", async () => {
+    return getTradeAnalytics();
   });
 
   app.get("/api/trading/audit", async (req) => {

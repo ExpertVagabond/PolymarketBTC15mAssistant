@@ -176,6 +176,26 @@
       <div id="tradingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Live Trade Feed -->
+    <div class="card wide">
+      <div class="card-title">Live Trade Feed <span id="wsBadge" style="font-size:9px;padding:1px 6px;border-radius:8px;background:#f8717120;color:#f87171;margin-left:6px">OFFLINE</span></div>
+      <div id="tradeFeed" style="max-height:220px;overflow-y:auto;font-size:11px">
+        <div data-placeholder style="color:#4b5563;font-size:12px">Waiting for trade events...</div>
+      </div>
+    </div>
+
+    <!-- Trade Analytics -->
+    <div class="card half">
+      <div class="card-title">Trade Analytics</div>
+      <div id="analyticsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Close Reasons -->
+    <div class="card">
+      <div class="card-title">Close Reasons</div>
+      <div id="closeReasonsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
@@ -227,7 +247,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -240,7 +260,8 @@ async function loadAdmin() {
       fetch("/api/trading/status").then(r => r.json()).catch(() => null),
       fetch("/api/trading/open").then(r => r.json()).catch(() => []),
       fetch("/api/trading/pnl").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/config").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/config").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/analytics").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -254,6 +275,7 @@ async function loadAdmin() {
     if (maint) renderMaintenance(maint);
     if (tradingConfig) renderTradingConfig(tradingConfig);
     if (trading) { trading._openExecutions = openExecs || []; trading._pnl = pnl; renderTrading(trading); }
+    if (analytics) renderAnalytics(analytics);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -654,8 +676,10 @@ async function saveConfig() {
     const data = await res.json();
     const el = $("configResult");
     if (data.ok) {
-      el.textContent = "Saved"; el.style.color = "#34d399"; el.style.display = "block";
-      setTimeout(() => { el.style.display = "none"; }, 3000);
+      const warnText = (data.warnings || []).map(w => w.warning).join("; ");
+      el.innerHTML = "Saved" + (warnText ? `<br><span style="color:#fbbf24;font-size:10px">${esc(warnText)}</span>` : "");
+      el.style.color = "#34d399"; el.style.display = "block";
+      setTimeout(() => { el.style.display = "none"; }, warnText ? 6000 : 3000);
     } else {
       el.textContent = "Errors: " + (data.errors || []).map(e => e.key + ": " + e.error).join(", ");
       el.style.color = "#f87171"; el.style.display = "block";
@@ -663,8 +687,111 @@ async function saveConfig() {
   } catch (err) { alert("Error: " + err.message); }
 }
 
+function renderAnalytics(a) {
+  if (!a || !a.overall) return;
+  const o = a.overall;
+  const wr = o.win_rate != null ? o.win_rate + "%" : "N/A";
+  const wrClass = (o.win_rate || 0) >= 50 ? "green" : "red";
+  const pnlClass = (o.total_pnl || 0) >= 0 ? "green" : "red";
+
+  $("analyticsBlock").innerHTML = `
+    <div class="kv"><span class="k">Total Trades</span><span class="v">${o.total_trades} (${o.live_trades} live / ${o.dry_runs} dry)</span></div>
+    <div class="kv"><span class="k">Win Rate</span><span class="v ${wrClass}">${wr}</span></div>
+    <div class="kv"><span class="k">Total P&L</span><span class="v ${pnlClass}">$${(o.total_pnl || 0).toFixed(2)}</span></div>
+    <div class="kv"><span class="k">Avg Win / Loss</span><span class="v">$${(o.avg_win || 0).toFixed(2)} / $${(o.avg_loss || 0).toFixed(2)}</span></div>
+    <div class="kv"><span class="k">Best / Worst</span><span class="v">$${(o.best_trade || 0).toFixed(2)} / $${(o.worst_trade || 0).toFixed(2)}</span></div>
+    <div class="kv"><span class="k">Avg Hold Time</span><span class="v">${a.avgHoldMinutes ? a.avgHoldMinutes.toFixed(0) + " min" : "N/A"}</span></div>
+    <div class="kv"><span class="k">Edge Accuracy</span><span class="v">${a.edgeAccuracy?.avg_predicted_edge_pct != null ? "Pred: " + a.edgeAccuracy.avg_predicted_edge_pct + "% / Actual: " + a.edgeAccuracy.avg_actual_pnl_pct + "% (" + a.edgeAccuracy.sample_size + " trades)" : "N/A"}</span></div>
+    ${(a.byCategory || []).length > 0 ? '<div style="margin-top:8px;font-size:10px;color:#4b5563;font-weight:700;text-transform:uppercase">By Category</div>' +
+      a.byCategory.map(c => `<div class="kv"><span class="k">${esc(c.category)}</span><span class="v">${c.wins}W/${c.losses}L | $${(c.total_pnl || 0).toFixed(2)}</span></div>`).join("") : ""}
+  `;
+
+  // Close reasons
+  $("closeReasonsBlock").innerHTML = (a.byCloseReason || []).length > 0
+    ? a.byCloseReason.map(r => `<div class="kv"><span class="k">${esc(r.reason)}</span><span class="v">${r.count} trades | $${(r.total_pnl || 0).toFixed(2)}</span></div>`).join("")
+    : '<div style="color:#4b5563;font-size:12px">No closed trades yet</div>';
+}
+
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }
 
+// --- WebSocket: live trade events ---
+const MAX_FEED_ITEMS = 50;
+let ws = null;
+let wsReconnectTimer = null;
+
+function connectWs() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    const badge = $("wsBadge");
+    if (badge) { badge.textContent = "LIVE"; badge.style.background = "#34d39920"; badge.style.color = "#34d399"; }
+  };
+
+  ws.onclose = () => {
+    const badge = $("wsBadge");
+    if (badge) { badge.textContent = "OFFLINE"; badge.style.background = "#f8717120"; badge.style.color = "#f87171"; }
+    wsReconnectTimer = setTimeout(connectWs, 5000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === "trade") handleTradeEvent(msg);
+    } catch {}
+  };
+}
+
+function handleTradeEvent(msg) {
+  const feed = $("tradeFeed");
+  if (!feed) return;
+
+  // Remove placeholder text on first event
+  if (feed.children.length === 1 && feed.children[0].tagName !== "DIV") { /* keep */ }
+  if (feed.querySelector("[data-placeholder]")) feed.querySelector("[data-placeholder]").remove();
+
+  const colors = {
+    POSITION_OPENED: "#34d399", POSITION_CLOSED: "#60a5fa", ORDER_PLACED: "#a78bfa",
+    ORDER_FILLED: "#34d399", TRAILING_STOP: "#fbbf24", BREAKEVEN_STOP: "#fbbf24",
+    RISK_BLOCKED: "#f87171", CLOB_UNREACHABLE: "#f87171", CONFIG_CHANGE: "#c084fc"
+  };
+
+  const color = colors[msg.event] || "#6b7280";
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+  let detail = "";
+
+  if (msg.event === "POSITION_OPENED") {
+    detail = `${msg.side} on ${esc((msg.question || msg.marketId || "").slice(0, 45))} | $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}${msg.dryRun ? " [DRY]" : ""}`;
+  } else if (msg.event === "POSITION_CLOSED") {
+    const pnl = msg.pnlUsd || 0;
+    detail = `${msg.closeReason} | ${msg.side} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${(msg.pnlPct || 0).toFixed(1)}%) | held ${msg.holdMinutes || 0}m`;
+  } else if (msg.event === "ORDER_PLACED") {
+    detail = `${msg.side} $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}`;
+  } else if (msg.event === "CLOB_UNREACHABLE") {
+    detail = `${msg.consecutiveFailures} consecutive failures`;
+  } else if (msg.event === "CONFIG_CHANGE") {
+    detail = JSON.stringify(msg.changes || {}).slice(0, 80);
+  } else {
+    detail = msg.marketId || "";
+  }
+
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #141420;align-items:baseline";
+  row.innerHTML = `<span style="color:#4b5563;min-width:65px">${time}</span><span style="color:${color};font-weight:600;min-width:130px">${esc(msg.event)}</span><span style="color:#9ca3af;flex:1">${detail}</span>`;
+  feed.prepend(row);
+
+  // Trim old entries
+  while (feed.children.length > MAX_FEED_ITEMS) feed.removeChild(feed.lastChild);
+
+  // Auto-refresh positions on trade events
+  if (msg.event === "POSITION_OPENED" || msg.event === "POSITION_CLOSED") {
+    loadAdmin();
+  }
+}
+
+connectWs();
 loadAdmin();
 setInterval(loadAdmin, 30_000);
 </script>

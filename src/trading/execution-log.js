@@ -216,3 +216,101 @@ export function cancelAllOpenExecutions() {
   ).run();
   return { ok: true, cancelled: info.changes, positions: open };
 }
+
+/**
+ * Get detailed trade performance analytics.
+ */
+export function getTradeAnalytics() {
+  ensureTable();
+  const db = getDb();
+
+  // Overall stats
+  const overall = db.prepare(`
+    SELECT
+      COUNT(*) as total_trades,
+      SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      SUM(CASE WHEN pnl_usd = 0 AND status = 'closed' THEN 1 ELSE 0 END) as breakeven,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(CASE WHEN pnl_usd IS NOT NULL THEN pnl_pct END), 2) as avg_pnl_pct,
+      ROUND(AVG(CASE WHEN pnl_usd > 0 THEN pnl_usd END), 4) as avg_win,
+      ROUND(AVG(CASE WHEN pnl_usd < 0 THEN pnl_usd END), 4) as avg_loss,
+      MAX(pnl_usd) as best_trade,
+      MIN(pnl_usd) as worst_trade,
+      SUM(CASE WHEN dry_run = 0 THEN 1 ELSE 0 END) as live_trades,
+      SUM(CASE WHEN dry_run = 1 THEN 1 ELSE 0 END) as dry_runs
+    FROM trade_executions
+  `).get();
+
+  // Win rate
+  const settled = (overall.wins || 0) + (overall.losses || 0);
+  overall.win_rate = settled > 0 ? Math.round((overall.wins / settled) * 100) : null;
+
+  // By category
+  const byCategory = db.prepare(`
+    SELECT
+      COALESCE(category, 'other') as category,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct
+    FROM trade_executions WHERE status = 'closed'
+    GROUP BY COALESCE(category, 'other')
+    ORDER BY total_pnl DESC
+  `).all();
+
+  // By day (last 30 days)
+  const byDay = db.prepare(`
+    SELECT
+      DATE(opened_at) as day,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as pnl
+    FROM trade_executions
+    WHERE opened_at >= datetime('now', '-30 days') AND status = 'closed'
+    GROUP BY DATE(opened_at)
+    ORDER BY day DESC
+  `).all();
+
+  // Avg hold time (in minutes) for closed trades
+  const holdTime = db.prepare(`
+    SELECT ROUND(AVG(
+      (julianday(closed_at) - julianday(opened_at)) * 24 * 60
+    ), 1) as avg_hold_minutes
+    FROM trade_executions
+    WHERE status = 'closed' AND closed_at IS NOT NULL
+  `).get();
+
+  // By close reason
+  const byCloseReason = db.prepare(`
+    SELECT
+      COALESCE(close_reason, 'unknown') as reason,
+      COUNT(*) as count,
+      ROUND(SUM(pnl_usd), 4) as total_pnl
+    FROM trade_executions WHERE status = 'closed'
+    GROUP BY close_reason
+    ORDER BY count DESC
+  `).all();
+
+  // Edge accuracy: compare predicted edge to actual P&L %
+  const edgeAccuracy = db.prepare(`
+    SELECT
+      ROUND(AVG(edge * 100), 2) as avg_predicted_edge_pct,
+      ROUND(AVG(pnl_pct), 2) as avg_actual_pnl_pct,
+      COUNT(*) as sample_size
+    FROM trade_executions
+    WHERE status = 'closed' AND edge IS NOT NULL AND pnl_pct IS NOT NULL
+  `).get();
+
+  return {
+    overall,
+    byCategory,
+    byDay,
+    avgHoldMinutes: holdTime?.avg_hold_minutes || null,
+    byCloseReason,
+    edgeAccuracy
+  };
+}

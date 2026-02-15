@@ -7,7 +7,7 @@
  */
 
 import { recordTradeClose } from "./risk-manager.js";
-import { placeSellOrder } from "./clob-orders.js";
+import { placeSellOrderWithRetry } from "./clob-orders.js";
 import { closeExecution } from "./execution-log.js";
 import { isMonitorActive, checkDrainComplete } from "./bot-control.js";
 import { logAuditEvent } from "./audit-log.js";
@@ -21,23 +21,33 @@ const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false
 // In-memory ledger of open trades (maps signal ID to trade info)
 const openTrades = new Map();
 let monitorTimer = null;
+let consecutiveClobFailures = 0;
 
 /**
- * Fetch a single token's current price from the CLOB API.
+ * Fetch a single token's current price from the CLOB API (with retry).
  */
 async function fetchTokenPrice(tokenId) {
   if (!tokenId) return null;
-  try {
-    const url = new URL("/price", CONFIG.clobBaseUrl);
-    url.searchParams.set("token_id", tokenId);
-    url.searchParams.set("side", "BUY");
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.price != null ? Number(data.price) : null;
-  } catch {
-    return null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const url = new URL("/price", CONFIG.clobBaseUrl);
+      url.searchParams.set("token_id", tokenId);
+      url.searchParams.set("side", "BUY");
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) {
+        if (attempt < 3 && (res.status >= 500 || res.status === 429)) {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+          continue;
+        }
+        return null;
+      }
+      const data = await res.json();
+      return data.price != null ? Number(data.price) : null;
+    } catch {
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
   }
+  return null;
 }
 
 /**
@@ -78,7 +88,7 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
   let sellResult = null;
   if (!trade.dryRun && !DRY_RUN && closeReason !== "SETTLED_WIN" && closeReason !== "SETTLED_LOSS") {
     try {
-      sellResult = await placeSellOrder({ tokenId: trade.tokenId, amount: trade.betSize });
+      sellResult = await placeSellOrderWithRetry({ tokenId: trade.tokenId, amount: trade.betSize });
       if (!sellResult.ok) {
         console.warn(`[settlement] SELL order failed for signal #${trade.signalId}: ${JSON.stringify(sellResult.data)}`);
       }
@@ -143,11 +153,15 @@ async function checkOpenTrades() {
   const BREAKEVEN_TRIGGER_PCT = getConfigValue("breakeven_trigger_pct");
   const MAX_HOLD_HOURS = getConfigValue("max_hold_hours");
 
+  let priceFetchFails = 0;
+  let priceFetchOk = 0;
+
   for (const [signalId, trade] of openTrades) {
     try {
       // Fetch current price from CLOB
       const currentPrice = await fetchTokenPrice(trade.tokenId);
-      if (currentPrice == null) continue;
+      if (currentPrice == null) { priceFetchFails++; continue; }
+      priceFetchOk++;
 
       // Update peak price
       if (currentPrice > trade.highestPrice) {
@@ -199,8 +213,20 @@ async function checkOpenTrades() {
         await executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd);
       }
     } catch (err) {
-      // Silently skip failed checks — will retry next cycle
+      priceFetchFails++;
     }
+  }
+
+  // Track consecutive CLOB failures
+  if (priceFetchOk === 0 && priceFetchFails > 0) {
+    consecutiveClobFailures++;
+    if (consecutiveClobFailures >= 3) {
+      console.warn(`[settlement] WARNING: CLOB API unreachable for ${consecutiveClobFailures} consecutive cycles (${priceFetchFails} failed price fetches)`);
+      logAuditEvent("CLOB_UNREACHABLE", { consecutiveFailures: consecutiveClobFailures, failedFetches: priceFetchFails });
+      broadcastTradeEvent("CLOB_UNREACHABLE", { consecutiveFailures: consecutiveClobFailures });
+    }
+  } else {
+    consecutiveClobFailures = 0;
   }
 }
 

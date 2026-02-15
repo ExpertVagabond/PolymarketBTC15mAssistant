@@ -5,6 +5,7 @@
 
 import { getDb } from "../subscribers/db.js";
 import { logAuditEvent } from "./audit-log.js";
+import { broadcastTradeEvent } from "../web/ws-handler.js";
 
 let initialized = false;
 
@@ -104,7 +105,18 @@ export function getTradingConfig() {
 export function updateTradingConfig(updates, updatedBy = "admin") {
   ensureLoaded();
   const errors = [];
+  const warnings = [];
   const updated = {};
+
+  // Fetch current state for constraint checks
+  let currentOpenPositions = 0;
+  let currentExposure = 0;
+  try {
+    const row = getDb().prepare("SELECT COUNT(*) as count FROM trade_executions WHERE status = 'open'").get();
+    currentOpenPositions = row?.count || 0;
+    const expRow = getDb().prepare("SELECT SUM(amount) as total FROM trade_executions WHERE status = 'open'").get();
+    currentExposure = expRow?.total || 0;
+  } catch { /* tables may not exist yet */ }
 
   for (const [key, rawValue] of Object.entries(updates)) {
     const rule = CONFIG_RULES[key];
@@ -114,6 +126,14 @@ export function updateTradingConfig(updates, updatedBy = "admin") {
     if (isNaN(value)) { errors.push({ key, error: "not_a_number" }); continue; }
     if (rule.type === "integer" && !Number.isInteger(value)) { errors.push({ key, error: "must_be_integer" }); continue; }
     if (value < rule.min || value > rule.max) { errors.push({ key, error: `out_of_range (${rule.min}-${rule.max})` }); continue; }
+
+    // State-aware constraint warnings
+    if (key === "max_open_positions" && value < currentOpenPositions) {
+      warnings.push({ key, warning: `Currently ${currentOpenPositions} open positions — new limit ${value} won't close existing, but blocks new trades` });
+    }
+    if (key === "max_total_exposure_usd" && value < currentExposure) {
+      warnings.push({ key, warning: `Current exposure $${currentExposure.toFixed(2)} exceeds new limit $${value} — blocks new trades until exposure reduces` });
+    }
 
     const oldValue = _config[key];
     _config[key] = value;
@@ -127,9 +147,15 @@ export function updateTradingConfig(updates, updatedBy = "admin") {
 
   if (Object.keys(updated).length > 0) {
     logAuditEvent("CONFIG_CHANGE", { detail: { updated, by: updatedBy } });
+    try { broadcastTradeEvent("CONFIG_CHANGE", { changes: updated, by: updatedBy }); } catch { /* non-fatal */ }
   }
 
-  return { ok: errors.length === 0, updated, errors: errors.length > 0 ? errors : undefined };
+  return {
+    ok: errors.length === 0,
+    updated,
+    errors: errors.length > 0 ? errors : undefined,
+    warnings: warnings.length > 0 ? warnings : undefined
+  };
 }
 
 /**

@@ -242,6 +242,51 @@ export async function pollOrderFill(orderId, { pollIntervalMs = 5000, maxPollMs 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
+ * Generic retry wrapper with exponential backoff.
+ * @param {Function} fn - async function to retry
+ * @param {{ maxRetries?: number, baseDelayMs?: number, shouldRetry?: Function }} opts
+ */
+async function withRetry(fn, { maxRetries = 3, baseDelayMs = 1000, shouldRetry } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fn();
+      // If result has ok=false and we should retry on that, do so
+      if (shouldRetry && !shouldRetry(result, null)) return result;
+      if (result?.ok === false && attempt < maxRetries) {
+        const status = result.status || 0;
+        // Only retry on server errors (5xx) or rate limits (429)
+        if (status >= 500 || status === 429) {
+          await sleep(baseDelayMs * Math.pow(2, attempt - 1));
+          continue;
+        }
+      }
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        await sleep(baseDelayMs * Math.pow(2, attempt - 1));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Place a BUY order with retry (exponential backoff on 5xx/429).
+ */
+export async function placeMarketOrderWithRetry(opts, maxRetries = 3) {
+  return withRetry(() => placeMarketOrder(opts), { maxRetries, baseDelayMs: 1000 });
+}
+
+/**
+ * Place a SELL order with retry (exponential backoff on 5xx/429).
+ */
+export async function placeSellOrderWithRetry(opts, maxRetries = 3) {
+  return withRetry(() => placeSellOrder(opts), { maxRetries, baseDelayMs: 1000 });
+}
+
+/**
  * Cancel an open order by ID.
  */
 export async function cancelOrder({ orderId }) {

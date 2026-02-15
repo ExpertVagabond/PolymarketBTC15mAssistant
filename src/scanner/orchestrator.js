@@ -27,7 +27,9 @@ export function createOrchestrator(opts = {}) {
   const staggerMs = opts.staggerMs ?? 200; // 200ms between market polls to avoid rate limit bursts
 
   const emitter = new EventEmitter();
-  const pollers = new Map(); // marketId → { poller, lastTick }
+  const pollers = new Map(); // marketId → { poller, lastTick, health }
+  const rotationLog = [];    // last N rotation events
+  const MAX_ROTATION_LOG = 200;
   let running = false;
   let stopRequested = false;
 
@@ -42,8 +44,11 @@ export function createOrchestrator(opts = {}) {
     // Stop pollers for markets that are no longer active
     for (const [id, entry] of pollers) {
       if (!activeIds.has(id)) {
+        const evt = { action: "removed", marketId: id, question: entry.poller.market.question, category: entry.poller.market.category, timestamp: Date.now() };
+        rotationLog.push(evt);
+        if (rotationLog.length > MAX_ROTATION_LOG) rotationLog.shift();
         pollers.delete(id);
-        emitter.emit("market:removed", { marketId: id, question: entry.poller.market.question });
+        emitter.emit("market:removed", evt);
       }
     }
 
@@ -51,8 +56,14 @@ export function createOrchestrator(opts = {}) {
     for (const market of markets) {
       if (!pollers.has(market.id)) {
         const poller = createMarketPoller(market);
-        pollers.set(market.id, { poller, lastTick: null });
-        emitter.emit("market:added", { marketId: market.id, question: market.question, category: market.category });
+        pollers.set(market.id, {
+          poller, lastTick: null,
+          health: { totalPolls: 0, totalErrors: 0, consecutiveErrors: 0, lastError: null, lastErrorAt: null, lastSuccessAt: null }
+        });
+        const evt = { action: "added", marketId: market.id, question: market.question, category: market.category, timestamp: Date.now() };
+        rotationLog.push(evt);
+        if (rotationLog.length > MAX_ROTATION_LOG) rotationLog.shift();
+        emitter.emit("market:added", evt);
       }
     }
 
@@ -72,13 +83,21 @@ export function createOrchestrator(opts = {}) {
       try {
         const tick = await entry.poller.pollOnce();
         entry.lastTick = tick;
+        entry.health.totalPolls++;
+        entry.health.consecutiveErrors = 0;
+        entry.health.lastSuccessAt = Date.now();
         results.push(tick);
 
         if (tick.ok && tick.rec?.action === "ENTER") {
           emitter.emit("signal:enter", tick);
         }
       } catch (err) {
-        emitter.emit("error", { marketId: entry.poller.market.id, error: err.message });
+        entry.health.totalPolls++;
+        entry.health.totalErrors++;
+        entry.health.consecutiveErrors++;
+        entry.health.lastError = err.message;
+        entry.health.lastErrorAt = Date.now();
+        emitter.emit("error", { marketId: entry.poller.market.id, error: err.message, consecutiveErrors: entry.health.consecutiveErrors });
       }
 
       // Stagger to avoid rate limit bursts
@@ -176,12 +195,47 @@ export function createOrchestrator(opts = {}) {
     return { discovered: markets.length, tracked, withSignal, categories };
   }
 
+  /**
+   * Get per-market health stats (for admin dashboard).
+   */
+  function getMarketHealth() {
+    const results = [];
+    for (const [id, entry] of pollers) {
+      const h = entry.health;
+      const successRate = h.totalPolls > 0 ? ((h.totalPolls - h.totalErrors) / h.totalPolls * 100).toFixed(1) : "100.0";
+      results.push({
+        marketId: id,
+        question: entry.poller.market.question,
+        category: entry.poller.market.category || "other",
+        totalPolls: h.totalPolls,
+        totalErrors: h.totalErrors,
+        consecutiveErrors: h.consecutiveErrors,
+        successRate: Number(successRate),
+        lastError: h.lastError,
+        lastErrorAt: h.lastErrorAt,
+        lastSuccessAt: h.lastSuccessAt,
+        hasSignal: !!(entry.lastTick?.ok && entry.lastTick?.rec?.action === "ENTER"),
+        signal: entry.lastTick?.signal || null
+      });
+    }
+    return results.sort((a, b) => b.consecutiveErrors - a.consecutiveErrors);
+  }
+
+  /**
+   * Get rotation event log (added/removed markets).
+   */
+  function getRotationLog(limit = 50) {
+    return rotationLog.slice(-limit).reverse();
+  }
+
   return {
     start,
     stop,
     getState,
     getActiveSignals,
     getStats,
+    getMarketHealth,
+    getRotationLog,
     refreshMarkets,
     pollAllOnce,
     on: emitter.on.bind(emitter),
