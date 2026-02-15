@@ -1,11 +1,12 @@
 import { CONFIG } from "../config.js";
+import { withResilience } from "../net/resilience.js";
 
 function toNumber(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-export async function fetchKlines({ interval, limit }) {
+async function _fetchKlines({ interval, limit }) {
   const url = new URL("/api/v3/klines", CONFIG.binanceBaseUrl);
   url.searchParams.set("symbol", CONFIG.symbol);
   url.searchParams.set("interval", interval);
@@ -28,7 +29,7 @@ export async function fetchKlines({ interval, limit }) {
   }));
 }
 
-export async function fetchLastPrice() {
+async function _fetchLastPrice() {
   const url = new URL("/api/v3/ticker/price", CONFIG.binanceBaseUrl);
   url.searchParams.set("symbol", CONFIG.symbol);
   const res = await fetch(url);
@@ -38,3 +39,13 @@ export async function fetchLastPrice() {
   const data = await res.json();
   return toNumber(data.price);
 }
+
+export const fetchKlines = withResilience("binance", _fetchKlines, {
+  maxRetries: 3, baseDelayMs: 500, timeoutMs: 10_000,
+  fallback: () => []
+});
+
+export const fetchLastPrice = withResilience("binance-price", _fetchLastPrice, {
+  maxRetries: 2, baseDelayMs: 300, timeoutMs: 5_000,
+  fallback: () => null
+});

@@ -14,7 +14,7 @@ import { broadcastSignal as dcBroadcast, flushDelayed as dcFlush } from "./bots/
 import { broadcastState } from "./web/ws-handler.js";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
 import { getDb, closeDb } from "./subscribers/db.js";
-import { initSignalHistory, logSignal, getUnsettledSignals, recordOutcome, getSignalStats } from "./signals/history.js";
+import { initSignalHistory, logSignal, getUnsettledSignals, recordOutcome, getSignalStats, voidStaleSignals, purgeOldSignals, getRecentlySettled } from "./signals/history.js";
 import { startWeightRefresh, stopWeightRefresh, getAllWeights } from "./engines/weights.js";
 import { fetchClobPrice } from "./data/polymarket.js";
 import { sleep } from "./utils.js";
@@ -103,35 +103,39 @@ async function main() {
   setInterval(async () => {
     try {
       const unsettled = getUnsettledSignals();
+      let settledCount = 0;
+
       for (const sig of unsettled) {
-        // Look up current market state from orchestrator
         const state = orchestrator.getState();
         const entry = state[sig.market_id];
         if (!entry?.lastTick) continue;
 
         const tick = entry.lastTick;
-        const settlementMin = tick.settlementLeftMin ?? tick.market?.settlementLeftMin;
+        const market = tick.market || {};
+        const settlementMin = tick.settlementLeftMin ?? market.settlementLeftMin;
 
-        // Only settle if market is past settlement time (or very close)
-        if (settlementMin != null && settlementMin > 0) continue;
+        // Check 1: Market explicitly closed/resolved
+        const isClosed = market.closed === true || market.active === false;
 
-        // Market has settled — determine outcome
-        // If settlement time has passed, the final YES/NO prices tell us the outcome
-        // YES ≈ 1.0 means YES won, NO ≈ 1.0 means NO won
-        const yesPrice = tick.prices?.up ?? tick.market?.up;
-        const noPrice = tick.prices?.down ?? tick.market?.down;
+        // Check 2: Settlement time passed
+        const isPastSettlement = settlementMin != null && settlementMin <= 0;
+
+        if (!isClosed && !isPastSettlement) continue;
+
+        // Determine outcome from final prices
+        const yesPrice = tick.prices?.up ?? market.up;
+        const noPrice = tick.prices?.down ?? market.down;
 
         if (yesPrice == null || noPrice == null) continue;
 
-        // Settled: price near 0 or 1 indicates resolution
-        const settled = yesPrice > 0.9 || yesPrice < 0.1 || noPrice > 0.9 || noPrice < 0.1;
-        if (!settled) continue;
+        // Settled: price near 0 or 1 (or market explicitly closed)
+        const priceSettled = yesPrice > 0.9 || yesPrice < 0.1 || noPrice > 0.9 || noPrice < 0.1;
+        if (!isClosed && !priceSettled) continue;
 
         const yesWon = yesPrice > 0.5;
         const sigBoughtYes = sig.side === "UP";
         const won = (sigBoughtYes && yesWon) || (!sigBoughtYes && !yesWon);
 
-        // P&L: if you bought at market_yes/market_no and it resolved to 1.0 or 0.0
         const entryPrice = sigBoughtYes ? (sig.market_yes || 0.5) : (sig.market_no || 0.5);
         const pnlPct = won ? ((1.0 - entryPrice) / entryPrice) : -1.0;
 
@@ -143,12 +147,37 @@ async function main() {
           pnlPct
         });
 
+        settledCount++;
         console.log(`[signals] ${won ? "WIN" : "LOSS"}: ${sig.side} on ${sig.market_id.slice(0, 8)}... (edge: ${((sig.edge || 0) * 100).toFixed(1)}%, pnl: ${(pnlPct * 100).toFixed(1)}%)`);
+      }
+
+      // Void stale signals (>24h past expected settlement with no resolution)
+      const voided = voidStaleSignals();
+      if (voided > 0) console.log(`[signals] Voided ${voided} stale signal(s)`);
+
+      // Push settlement notifications to bots
+      if (settledCount > 0) {
+        const recent = getRecentlySettled(3);
+        for (const s of recent) {
+          const msg = `${s.outcome === "WIN" ? "WIN" : "LOSS"}: ${s.side === "UP" ? "YES" : "NO"} on ${(s.question || "").slice(0, 50)} | P&L: ${s.pnl_pct != null ? (s.pnl_pct >= 0 ? "+" : "") + (s.pnl_pct * 100).toFixed(1) + "%" : "-"}`;
+          tgBroadcast({ signal: "SETTLED", question: s.question, category: s.category, settlementMsg: msg }).catch(() => {});
+          dcBroadcast({ signal: "SETTLED", question: s.question, category: s.category, settlementMsg: msg }).catch(() => {});
+        }
       }
     } catch (err) {
       console.error("[signals] Outcome check error:", err.message);
     }
   }, 120_000);
+
+  // Data retention: purge old settled signals daily (check every hour)
+  setInterval(() => {
+    try {
+      const purged = purgeOldSignals(90);
+      if (purged > 0) console.log(`[retention] Purged ${purged} signals older than 90 days`);
+    } catch (err) {
+      console.error("[retention] Purge error:", err.message);
+    }
+  }, 3600_000);
 
   // Broadcast scanner state to WebSocket clients periodically
   setInterval(() => {

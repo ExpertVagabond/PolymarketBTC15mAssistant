@@ -1,11 +1,12 @@
 import { CONFIG } from "../config.js";
+import { withResilience } from "../net/resilience.js";
 
 function toNumber(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-export async function fetchMarketBySlug(slug) {
+async function _fetchMarketBySlug(slug) {
   const url = new URL("/markets", CONFIG.gammaBaseUrl);
   url.searchParams.set("slug", slug);
 
@@ -21,7 +22,7 @@ export async function fetchMarketBySlug(slug) {
   return market;
 }
 
-export async function fetchMarketsBySeriesSlug({ seriesSlug, limit = 50 }) {
+async function _fetchMarketsBySeriesSlug({ seriesSlug, limit = 50 }) {
   const url = new URL("/markets", CONFIG.gammaBaseUrl);
   url.searchParams.set("seriesSlug", seriesSlug);
   url.searchParams.set("active", "true");
@@ -38,7 +39,7 @@ export async function fetchMarketsBySeriesSlug({ seriesSlug, limit = 50 }) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function fetchLiveEventsBySeriesId({ seriesId, limit = 20 }) {
+async function _fetchLiveEventsBySeriesId({ seriesId, limit = 20 }) {
   const url = new URL("/events", CONFIG.gammaBaseUrl);
   url.searchParams.set("series_id", String(seriesId));
   url.searchParams.set("active", "true");
@@ -65,7 +66,7 @@ export function flattenEventMarkets(events) {
   return out;
 }
 
-export async function fetchActiveMarkets({ limit = 200, offset = 0 } = {}) {
+async function _fetchActiveMarkets({ limit = 200, offset = 0 } = {}) {
   const url = new URL("/markets", CONFIG.gammaBaseUrl);
   url.searchParams.set("active", "true");
   url.searchParams.set("closed", "false");
@@ -141,7 +142,7 @@ export function filterBtcUpDown15mMarkets(markets, { seriesSlug, slugPrefix } = 
   });
 }
 
-export async function fetchClobPrice({ tokenId, side }) {
+async function _fetchClobPrice({ tokenId, side }) {
   const url = new URL("/price", CONFIG.clobBaseUrl);
   url.searchParams.set("token_id", tokenId);
   url.searchParams.set("side", side);
@@ -154,7 +155,7 @@ export async function fetchClobPrice({ tokenId, side }) {
   return toNumber(data.price);
 }
 
-export async function fetchOrderBook({ tokenId }) {
+async function _fetchOrderBook({ tokenId }) {
   const url = new URL("/book", CONFIG.clobBaseUrl);
   url.searchParams.set("token_id", tokenId);
 
@@ -164,6 +165,32 @@ export async function fetchOrderBook({ tokenId }) {
   }
   return await res.json();
 }
+
+/* ── Resilient wrappers ── */
+
+export const fetchMarketBySlug = withResilience("polymarket-gamma", _fetchMarketBySlug, {
+  maxRetries: 2, baseDelayMs: 500, timeoutMs: 10_000, fallback: () => null
+});
+
+export const fetchMarketsBySeriesSlug = withResilience("polymarket-gamma", _fetchMarketsBySeriesSlug, {
+  maxRetries: 2, baseDelayMs: 500, timeoutMs: 10_000, fallback: () => []
+});
+
+export const fetchLiveEventsBySeriesId = withResilience("polymarket-gamma", _fetchLiveEventsBySeriesId, {
+  maxRetries: 2, baseDelayMs: 500, timeoutMs: 10_000, fallback: () => []
+});
+
+export const fetchActiveMarkets = withResilience("polymarket-gamma", _fetchActiveMarkets, {
+  maxRetries: 2, baseDelayMs: 500, timeoutMs: 15_000, fallback: () => []
+});
+
+export const fetchClobPrice = withResilience("polymarket-clob", _fetchClobPrice, {
+  maxRetries: 2, baseDelayMs: 300, timeoutMs: 5_000, fallback: () => null
+});
+
+export const fetchOrderBook = withResilience("polymarket-clob", _fetchOrderBook, {
+  maxRetries: 2, baseDelayMs: 300, timeoutMs: 5_000, fallback: () => ({ bids: [], asks: [] })
+});
 
 export function summarizeOrderBook(book, depthLevels = 5) {
   const bids = Array.isArray(book?.bids) ? book.bids : [];

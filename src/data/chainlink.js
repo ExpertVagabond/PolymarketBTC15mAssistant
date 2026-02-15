@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { CONFIG } from "../config.js";
+import { withResilience } from "../net/resilience.js";
 
 const AGGREGATOR_ABI = [
   "function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)",
@@ -85,7 +86,7 @@ async function fetchLatestRoundData(rpcUrl, aggregator) {
   };
 }
 
-export async function fetchChainlinkBtcUsd() {
+async function _fetchChainlinkBtcUsd() {
   if ((!CONFIG.chainlink.polygonRpcUrl && (!CONFIG.chainlink.polygonRpcUrls || CONFIG.chainlink.polygonRpcUrls.length === 0)) || !CONFIG.chainlink.btcUsdAggregator) {
     return { price: null, updatedAt: null, source: "missing_config" };
   }
@@ -128,3 +129,10 @@ export async function fetchChainlinkBtcUsd() {
 
   return cachedResult;
 }
+
+export const fetchChainlinkBtcUsd = withResilience("chainlink", _fetchChainlinkBtcUsd, {
+  maxRetries: 1, // already has internal RPC rotation
+  baseDelayMs: 500,
+  timeoutMs: 8_000,
+  fallback: () => ({ price: null, updatedAt: null, source: "chainlink_fallback" })
+});

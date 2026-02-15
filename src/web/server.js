@@ -6,11 +6,15 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyWebSocket from "@fastify/websocket";
+import fastifyRateLimit from "@fastify/rate-limit";
+import fastifyCors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import { addClient, broadcastState, getClientCount } from "./ws-handler.js";
 import { createPoller } from "../core/poller.js";
 import { createWindowTracker } from "../backtest/window-tracker.js";
 import { getState, getHistory } from "../core/state.js";
 import { applyGlobalProxyFromEnv } from "../net/proxy.js";
+import { getAllSourceHealth, getSystemStatus } from "../net/resilience.js";
 import { sendMagicLink, verifyMagicLink, verifySession, requireAuth, requireSubscription } from "./auth.js";
 import { verifyWebhookEvent, handleWebhookEvent } from "../subscribers/stripe-webhook.js";
 import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
@@ -37,6 +41,24 @@ export async function startWebServer(opts = {}) {
   const orchestrator = opts.orchestrator || null;
   const app = Fastify({ logger: false });
 
+  /* ── Security middleware ── */
+
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: false // allow inline scripts in dashboard
+  });
+
+  await app.register(fastifyCors, {
+    origin: process.env.CORS_ORIGIN || true, // allow all in dev, set CORS_ORIGIN in prod
+    methods: ["GET", "POST"]
+  });
+
+  await app.register(fastifyRateLimit, {
+    max: 100,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => req.ip,
+    allowList: ["127.0.0.1", "::1"]
+  });
+
   await app.register(fastifyStatic, {
     root: path.join(__dirname, "static"),
     prefix: "/"
@@ -52,6 +74,39 @@ export async function startWebServer(opts = {}) {
     if (current) {
       try { broadcastState(current); } catch { /* ignore */ }
     }
+  });
+
+  /* ── Health endpoints ── */
+
+  const startTime = Date.now();
+
+  app.get("/health", async () => {
+    return { status: "ok", uptime: Math.floor((Date.now() - startTime) / 1000) };
+  });
+
+  app.get("/health/detailed", async () => {
+    const sources = getAllSourceHealth();
+    const systemStatus = getSystemStatus();
+    const mem = process.memoryUsage();
+    const stats = orchestrator ? orchestrator.getStats() : null;
+
+    return {
+      status: systemStatus,
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      sources,
+      scanner: stats ? {
+        tracked: stats.tracked,
+        withSignal: stats.withSignal,
+        categories: stats.categories
+      } : null,
+      memory: {
+        rss: Math.round(mem.rss / 1024 / 1024) + "MB",
+        heap: Math.round(mem.heapUsed / 1024 / 1024) + "MB",
+        heapTotal: Math.round(mem.heapTotal / 1024 / 1024) + "MB"
+      },
+      wsClients: getClientCount(),
+      timestamp: new Date().toISOString()
+    };
   });
 
   /* ── Public API ── */
@@ -87,6 +142,40 @@ export async function startWebServer(opts = {}) {
       return orchestrator.getStats();
     });
   }
+
+  /* ── Public Stats API (no auth required) ── */
+
+  app.get("/api/public-stats", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const stats = getSignalStats();
+    const perf = getPerformanceSummary(days);
+    const ts = getTimeSeries(days);
+    const dd = getDrawdownStats();
+    const cal = getCalibration();
+
+    return {
+      period: `${days}d`,
+      winRate: stats.winRate,
+      totalSignals: stats.totalSignals,
+      settled: (stats.wins || 0) + (stats.losses || 0),
+      wins: stats.wins || 0,
+      losses: stats.losses || 0,
+      totalPnl: perf.total_pnl,
+      avgPnl: perf.avg_pnl,
+      sharpe: perf.sharpe,
+      maxDrawdown: dd.maxDrawdown,
+      bestTrade: perf.best_trade,
+      worstTrade: perf.worst_trade,
+      avgConfidence: perf.avg_confidence,
+      byCategory: stats.byCategory || [],
+      byStrength: stats.byStrength || [],
+      timeSeries: ts.slice(-30),
+      calibration: cal,
+      equityCurve: (dd.equityCurve || []).slice(-90),
+      streak: dd.currentStreak,
+      timestamp: new Date().toISOString()
+    };
+  });
 
   /* ── Signal History API ── */
 

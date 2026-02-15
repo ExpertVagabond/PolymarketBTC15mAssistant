@@ -302,6 +302,59 @@ export function getRecentSignals(limit = 50) {
 }
 
 /**
+ * Void stale signals: mark as VOID if unsettled and created >24h after expected settlement.
+ * Returns count of voided signals.
+ */
+export function voidStaleSignals() {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  // Signals where settlement_left_min was recorded AND enough time has passed
+  const result = db.prepare(`
+    UPDATE signal_history
+    SET outcome = 'VOID', settled_at = datetime('now'), pnl_pct = 0
+    WHERE outcome IS NULL
+      AND settled_at IS NULL
+      AND signal != 'NO TRADE'
+      AND created_at < datetime('now', '-24 hours')
+      AND settlement_left_min IS NOT NULL
+      AND settlement_left_min < 60
+  `).run();
+  return result.changes;
+}
+
+/**
+ * Purge old settled signals (data retention).
+ * Keeps last N days of settled signals in SQLite, returns count deleted.
+ */
+export function purgeOldSignals(retentionDays = 90) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  const result = db.prepare(`
+    DELETE FROM signal_history
+    WHERE outcome IS NOT NULL
+      AND settled_at IS NOT NULL
+      AND settled_at < datetime('now', '-' || ? || ' days')
+  `).run(retentionDays);
+  return result.changes;
+}
+
+/**
+ * Get recently settled signals (for settlement notifications).
+ */
+export function getRecentlySettled(minutesAgo = 5) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+  return db.prepare(`
+    SELECT * FROM signal_history
+    WHERE outcome IS NOT NULL
+      AND settled_at IS NOT NULL
+      AND settled_at > datetime('now', '-' || ? || ' minutes')
+    ORDER BY settled_at DESC
+    LIMIT 20
+  `).all(minutesAgo);
+}
+
+/**
  * Get aggregate stats.
  */
 export function getSignalStats() {
