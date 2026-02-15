@@ -190,6 +190,12 @@
       <div id="analyticsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- P&L Attribution -->
+    <div class="card">
+      <div class="card-title">P&L Attribution</div>
+      <div id="attributionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Signal Filters -->
     <div class="card">
       <div class="card-title">Signal Filters</div>
@@ -265,7 +271,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -282,7 +288,8 @@ async function loadAdmin() {
       fetch("/api/trading/analytics").then(r => r.json()).catch(() => null),
       fetch("/api/trading/hourly-stats").then(r => r.json()).catch(() => []),
       fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/audit?days=1&limit=25").then(r => r.json()).catch(() => [])
+      fetch("/api/trading/audit?days=1&limit=25").then(r => r.json()).catch(() => []),
+      fetch("/api/trading/attribution?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -300,6 +307,7 @@ async function loadAdmin() {
     if (hourlyStats) renderHourly(hourlyStats);
     if (filterStatsData) renderFilterStats(filterStatsData);
     if (auditEvents) renderAuditTimeline(auditEvents);
+    if (attribution) renderAttribution(attribution);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -790,6 +798,42 @@ function renderHourly(data) {
   el.innerHTML = html;
 }
 
+function renderAttribution(a) {
+  const el = $("attributionBlock");
+  if (!el) return;
+  let html = '';
+
+  // Quality tier attribution (most important)
+  if (a.byQuality?.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-bottom:4px">BY QUALITY</div>';
+    for (const q of a.byQuality) {
+      const wrColor = (q.win_rate || 0) >= 55 ? "green" : (q.win_rate || 0) < 45 ? "red" : "amber";
+      const pnlColor = (q.total_pnl || 0) >= 0 ? "green" : "red";
+      html += `<div class="kv"><span class="k" style="font-size:10px">Q:${q.tier}</span><span class="v" style="font-size:10px"><span class="${wrColor}">${q.win_rate ?? "-"}%</span> | <span class="${pnlColor}">$${(q.total_pnl || 0).toFixed(2)}</span> <span style="color:#4b5563">(${q.trades})</span></span></div>`;
+    }
+  }
+
+  // Regime attribution
+  if (a.byRegime?.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:8px;margin-bottom:4px">BY REGIME</div>';
+    for (const r of a.byRegime) {
+      const pnlColor = (r.total_pnl || 0) >= 0 ? "green" : "red";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(r.regime)}</span><span class="v" style="font-size:10px">${r.win_rate ?? "-"}% WR | <span class="${pnlColor}">$${(r.total_pnl || 0).toFixed(2)}</span></span></div>`;
+    }
+  }
+
+  // Strength attribution
+  if (a.byStrength?.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:8px;margin-bottom:4px">BY STRENGTH</div>';
+    for (const s of a.byStrength) {
+      const pnlColor = (s.total_pnl || 0) >= 0 ? "green" : "red";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(s.strength)}</span><span class="v" style="font-size:10px">${s.win_rate ?? "-"}% | <span class="${pnlColor}">$${(s.total_pnl || 0).toFixed(2)}</span></span></div>`;
+    }
+  }
+
+  el.innerHTML = html || '<div style="color:#4b5563;font-size:12px">No attribution data yet</div>';
+}
+
 function renderAuditTimeline(events) {
   const el = $("auditTimelineBlock");
   if (!el) return;
@@ -866,7 +910,7 @@ function handleTradeEvent(msg) {
   if (feed.querySelector("[data-placeholder]")) feed.querySelector("[data-placeholder]").remove();
 
   const colors = {
-    POSITION_OPENED: "#34d399", POSITION_CLOSED: "#60a5fa", ORDER_PLACED: "#a78bfa",
+    POSITION_OPENED: "#34d399", POSITION_CLOSED: "#60a5fa", PARTIAL_EXIT: "#c084fc", ORDER_PLACED: "#a78bfa",
     ORDER_FILLED: "#34d399", TRAILING_STOP: "#fbbf24", BREAKEVEN_STOP: "#fbbf24",
     RISK_BLOCKED: "#f87171", CLOB_UNREACHABLE: "#f87171", CONFIG_CHANGE: "#c084fc"
   };
@@ -882,6 +926,9 @@ function handleTradeEvent(msg) {
   } else if (msg.event === "POSITION_CLOSED") {
     const pnl = msg.pnlUsd || 0;
     detail = `${msg.closeReason} | ${msg.side} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${(msg.pnlPct || 0).toFixed(1)}%) | held ${msg.holdMinutes || 0}m`;
+  } else if (msg.event === "PARTIAL_EXIT") {
+    const pnl = msg.pnlUsd || 0;
+    detail = `Scale-out $${(msg.partialSize || 0).toFixed(2)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | remaining: $${(msg.remainingSize || 0).toFixed(2)}`;
   } else if (msg.event === "ORDER_PLACED") {
     detail = `${msg.side} $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}`;
   } else if (msg.event === "CLOB_UNREACHABLE") {

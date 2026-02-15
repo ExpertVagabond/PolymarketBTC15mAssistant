@@ -286,7 +286,10 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/filter-stats", desc: "Signal filter funnel: how many signals blocked by each gate (dedup, cooldown, regime, quality, etc)", tryable: true },
     { method: "GET", path: "/api/trading/quality-stats", desc: "Quality score distribution across recent trade executions", tryable: true },
     { method: "GET", path: "/api/trading/daily-summary?date=2026-02-15", desc: "Daily trade summary: P&L, win rate, quality stats, regime/category/side breakdown", tryable: true },
-    { method: "GET", path: "/api/trading/export?days=30&format=json", desc: "Export trade executions with full decision context (quality, regime, streak, sizing). Use format=csv for CSV", tryable: true }
+    { method: "GET", path: "/api/trading/export?days=30&format=json", desc: "Export trade executions with full decision context (quality, regime, streak, sizing). Use format=csv for CSV", tryable: true },
+    { method: "GET", path: "/api/trading/calibration", desc: "Confidence calibration: actual vs expected win rate per confidence decile, flags miscalibrated buckets", tryable: true },
+    { method: "GET", path: "/api/trading/attribution?days=30", desc: "P&L attribution: performance breakdown by quality tier, regime, category, hour, sizing method, strength", tryable: true },
+    { method: "GET", path: "/api/trading/regime-history", desc: "Regime transition tracker: current regime distribution and per-market transition history with stability", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

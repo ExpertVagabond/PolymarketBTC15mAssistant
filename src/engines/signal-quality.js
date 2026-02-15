@@ -28,22 +28,26 @@ export function computeSignalQuality(tick, context = {}) {
   // >1.0 = aligned (bonus), <1.0 = conflicting (penalty)
   breakdown.correlation = Math.min(15, Math.max(0, (corrAdj - 0.7) / 0.6 * 15));
 
-  // 4. Regime favorability (0-15 points)
+  // 4. Regime favorability (0-12 points)
   const regime = tick.regimeInfo?.regime || "RANGE";
-  const regimeScores = { TREND_UP: 15, TREND_DOWN: 15, RANGE: 8, CHOP: 0 };
-  breakdown.regime = regimeScores[regime] ?? 8;
+  const regimeScores = { TREND_UP: 12, TREND_DOWN: 12, RANGE: 6, CHOP: 0 };
+  breakdown.regime = regimeScores[regime] ?? 6;
 
-  // 5. Streak health (0-8 points)
+  // 5. Regime stability bonus (0-5 points) — rewards established regimes
+  const stability = tick.regimeInfo?.stability ?? 50;
+  breakdown.stability = Math.min(5, (stability / 100) * 5);
+
+  // 6. Streak health (0-6 points)
   const streakMult = context.streakMultiplier ?? 1.0;
-  breakdown.streak = Math.min(8, streakMult * 8);
+  breakdown.streak = Math.min(6, streakMult * 6);
 
-  // 6. Hourly favorability (0-7 points)
+  // 7. Hourly favorability (0-7 points)
   const hourMult = context.hourMultiplier ?? 1.0;
   breakdown.hourly = Math.min(7, hourMult * 6.36); // 1.1x → 7
 
   const quality = Math.round(
     breakdown.confidence + breakdown.edge + breakdown.correlation +
-    breakdown.regime + breakdown.streak + breakdown.hourly
+    breakdown.regime + breakdown.stability + breakdown.streak + breakdown.hourly
   );
 
   return {

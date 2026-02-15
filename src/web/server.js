@@ -46,10 +46,11 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates, getQualityDistribution, exportExecutions, getDailySummary } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates, getQualityDistribution, exportExecutions, getDailySummary, getPerformanceAttribution, getConfidenceCalibration } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats, getFilterStats } from "../trading/scanner-trader.js";
+import { getRegimeTransitions, getRegimeDistribution } from "../engines/regime.js";
 import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions, autoRepairStalePositions } from "../trading/audit-log.js";
 import { getWalletBalance } from "../trading/wallet.js";
 import { getRealtimePnl } from "../trading/pnl-tracker.js";
@@ -809,6 +810,19 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/quality-stats", async () => {
     return getQualityDistribution();
+  });
+
+  app.get("/api/trading/calibration", async () => {
+    return getConfidenceCalibration();
+  });
+
+  app.get("/api/trading/attribution", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getPerformanceAttribution(days);
+  });
+
+  app.get("/api/trading/regime-history", async () => {
+    return { distribution: getRegimeDistribution(), transitions: getRegimeTransitions() };
   });
 
   app.get("/api/trading/daily-summary", async (req) => {

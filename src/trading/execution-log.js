@@ -575,3 +575,178 @@ export function getDailySummary(date) {
 
   return { date: d, overview, byCategory, byRegime, bySide };
 }
+
+/**
+ * P&L attribution: break down performance by each decision factor.
+ * Uses the decision context columns added in Tier 24.
+ */
+export function getPerformanceAttribution(days = 30) {
+  ensureTable();
+  const db = getDb();
+  const daysParam = `-${days} days`;
+
+  // By quality tier
+  const byQuality = db.prepare(`
+    SELECT
+      CASE
+        WHEN quality < 30 THEN '0-29'
+        WHEN quality < 50 THEN '30-49'
+        WHEN quality < 70 THEN '50-69'
+        ELSE '70+'
+      END as tier,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct
+    FROM trade_executions
+    WHERE status = 'closed' AND quality IS NOT NULL AND opened_at >= datetime('now', ?)
+    GROUP BY tier ORDER BY tier
+  `).all(daysParam);
+
+  // By regime
+  const byRegime = db.prepare(`
+    SELECT
+      COALESCE(regime, 'unknown') as regime,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct
+    FROM trade_executions
+    WHERE status = 'closed' AND opened_at >= datetime('now', ?)
+    GROUP BY regime ORDER BY total_pnl DESC
+  `).all(daysParam);
+
+  // By hour of day
+  const byHour = db.prepare(`
+    SELECT
+      CAST(strftime('%H', opened_at) AS INTEGER) as hour,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as total_pnl
+    FROM trade_executions
+    WHERE status = 'closed' AND pnl_usd IS NOT NULL AND opened_at >= datetime('now', ?)
+    GROUP BY hour ORDER BY hour
+  `).all(daysParam);
+
+  // By sizing method
+  const bySizing = db.prepare(`
+    SELECT
+      COALESCE(sizing_method, 'unknown') as method,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(amount), 2) as avg_size
+    FROM trade_executions
+    WHERE status = 'closed' AND opened_at >= datetime('now', ?)
+    GROUP BY sizing_method ORDER BY total_pnl DESC
+  `).all(daysParam);
+
+  // By strength
+  const byStrength = db.prepare(`
+    SELECT
+      COALESCE(strength, 'unknown') as strength,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct
+    FROM trade_executions
+    WHERE status = 'closed' AND opened_at >= datetime('now', ?)
+    GROUP BY strength ORDER BY total_pnl DESC
+  `).all(daysParam);
+
+  // By category
+  const byCategory = db.prepare(`
+    SELECT
+      COALESCE(category, 'other') as category,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(quality), 1) as avg_quality
+    FROM trade_executions
+    WHERE status = 'closed' AND opened_at >= datetime('now', ?)
+    GROUP BY category ORDER BY total_pnl DESC
+  `).all(daysParam);
+
+  // Add win rates
+  const addWinRate = (rows) => rows.map(r => ({
+    ...r,
+    win_rate: (r.wins + (r.losses || 0)) > 0
+      ? Math.round((r.wins / (r.wins + (r.losses || (r.trades - r.wins)))) * 100)
+      : null
+  }));
+
+  return {
+    days,
+    byQuality: addWinRate(byQuality),
+    byRegime: addWinRate(byRegime),
+    byHour,
+    bySizing: addWinRate(bySizing),
+    byStrength: addWinRate(byStrength),
+    byCategory: addWinRate(byCategory)
+  };
+}
+
+/**
+ * Confidence calibration: bucket trades by confidence decile,
+ * compare predicted confidence to actual win rate.
+ * Flags buckets where actual win rate deviates >15% from expected.
+ */
+export function getConfidenceCalibration() {
+  ensureTable();
+  const db = getDb();
+
+  const buckets = db.prepare(`
+    SELECT
+      CAST(confidence / 10 AS INTEGER) * 10 as bucket_start,
+      COUNT(*) as trades,
+      SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN pnl_usd < 0 THEN 1 ELSE 0 END) as losses,
+      ROUND(SUM(pnl_usd), 4) as total_pnl,
+      ROUND(AVG(pnl_pct), 2) as avg_pnl_pct,
+      ROUND(AVG(edge), 4) as avg_edge,
+      ROUND(AVG(quality), 1) as avg_quality
+    FROM trade_executions
+    WHERE status = 'closed' AND confidence IS NOT NULL AND pnl_usd IS NOT NULL
+    GROUP BY CAST(confidence / 10 AS INTEGER)
+    ORDER BY bucket_start
+  `).all();
+
+  const calibration = buckets.map(b => {
+    const settled = (b.wins || 0) + (b.losses || 0);
+    const actualWinRate = settled > 0 ? Math.round((b.wins / settled) * 100) : null;
+    // Expected win rate: confidence/100 (ideally, 70 confidence = 70% win rate)
+    const expectedWinRate = b.bucket_start + 5; // midpoint of bucket
+    const deviation = actualWinRate != null ? actualWinRate - expectedWinRate : null;
+    const miscalibrated = deviation != null && Math.abs(deviation) > 15 && settled >= 5;
+
+    return {
+      bucket: `${b.bucket_start}-${b.bucket_start + 9}`,
+      trades: b.trades,
+      wins: b.wins,
+      losses: b.losses,
+      actualWinRate,
+      expectedWinRate,
+      deviation,
+      miscalibrated,
+      totalPnl: b.total_pnl,
+      avgEdge: b.avg_edge,
+      avgQuality: b.avg_quality
+    };
+  });
+
+  const miscalibratedBuckets = calibration.filter(b => b.miscalibrated);
+  const overconfident = miscalibratedBuckets.filter(b => b.deviation < -15);
+  const underconfident = miscalibratedBuckets.filter(b => b.deviation > 15);
+
+  return {
+    buckets: calibration,
+    summary: {
+      totalBuckets: calibration.length,
+      miscalibrated: miscalibratedBuckets.length,
+      overconfident: overconfident.map(b => b.bucket),
+      underconfident: underconfident.map(b => b.bucket)
+    }
+  };
+}

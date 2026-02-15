@@ -16,7 +16,7 @@ import { computeHeikenAshi, countConsecutive } from "../indicators/heikenAshi.js
 import { computeATR, computeBollingerWidth, classifyVolatility } from "../indicators/volatility.js";
 import { computeConfluence } from "../engines/confluence.js";
 import { getBtcMacroState, computeCorrelationAdj } from "../engines/correlation.js";
-import { detectRegime } from "../engines/regime.js";
+import { detectRegimeWithTracking } from "../engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "../engines/probability.js";
 import { computeEdge, decide } from "../engines/edge.js";
 import { analyzeMarketOrderFlow } from "../engines/orderflow.js";
@@ -176,7 +176,7 @@ export function createMarketPoller(market) {
     if (isCrypto) await getBtcMacroState(); // Ensure BTC state is fresh
 
     // Engines
-    const regimeInfo = detectRegime({ price: lastPrice, vwap: vwapNow, vwapSlope, vwapCrossCount, volumeRecent, volumeAvg });
+    const regimeInfo = detectRegimeWithTracking(market.slug || market.id, { price: lastPrice, vwap: vwapNow, vwapSlope, vwapCrossCount, volumeRecent, volumeAvg });
     const scored = scoreDirection({ price: lastPrice, vwap: vwapNow, vwapSlope, rsi: rsiNow, rsiSlope, macd, heikenColor: consec.color, heikenCount: consec.count, failedVwapReclaim, orderbookImbalance });
     const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, indicatorHorizon);
 

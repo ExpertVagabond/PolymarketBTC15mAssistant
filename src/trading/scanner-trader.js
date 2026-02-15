@@ -5,7 +5,7 @@
  * This replaces the single-market poller approach in bot.js with multi-market support.
  */
 
-import { canTrade, getBetSize, getKellyBetSize, recordTradeOpen, getRiskStatus } from "./risk-manager.js";
+import { canTrade, getBetSize, getKellyBetSize, recordTradeOpen, getRiskStatus, getRecoveryMultiplier } from "./risk-manager.js";
 import { canOpenNewTrades, getBotControlState } from "./bot-control.js";
 import { logDryRunTrade } from "./dry-run-logger.js";
 import { isTradingConfigured } from "./clob-auth.js";
@@ -132,7 +132,8 @@ async function processSignal(tick) {
 
   const edge = rec.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
   const sizing = getKellyBetSize(tick);
-  const betSize = Math.max(0.1, sizing.amount * regimeMultiplier * hourMultiplier);
+  const recoveryMult = getRecoveryMultiplier();
+  const betSize = Math.max(0.1, sizing.amount * regimeMultiplier * hourMultiplier * recoveryMult);
   const tokenId = rec.side === "UP"
     ? (tick.poly?.tokens?.upTokenId || tick.tokens?.upTokenId)
     : (tick.poly?.tokens?.downTokenId || tick.tokens?.downTokenId);

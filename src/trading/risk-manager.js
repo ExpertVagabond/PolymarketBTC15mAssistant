@@ -23,6 +23,16 @@ let circuitBroken = false;
 let totalTrades = 0;
 let totalPnl = 0;
 
+// Multi-tier breaker state
+let breakerTier = "none"; // none | warning | caution | tripped
+let recoveryMode = false;
+let recoveryWins = 0;
+
+// Velocity tracking: rolling 30-minute P&L window
+const velocityWindow = []; // { timestamp, pnl }
+const VELOCITY_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+const VELOCITY_LOSS_THRESHOLD_PCT = 0.5; // 50% of daily loss limit in 30 min = velocity trip
+
 function ensureTable() {
   if (initialized) return;
   const db = getDb();
@@ -77,9 +87,17 @@ function checkDayReset() {
   ensureLoaded();
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
   if (today !== dailyResetDate) {
+    // Enter recovery mode if breaker was tripped yesterday
+    if (circuitBroken || breakerTier === "tripped") {
+      recoveryMode = true;
+      recoveryWins = 0;
+      console.log("[risk] Entering recovery mode (breaker was tripped yesterday — 50% sizing until 2 wins)");
+    }
     dailyPnl = 0;
     dailyResetDate = today;
     circuitBroken = false;
+    breakerTier = "none";
+    velocityWindow.length = 0;
     saveState();
   }
 }
@@ -88,7 +106,10 @@ export function canTrade(category = null) {
   checkDayReset();
   if (circuitBroken) return { allowed: false, reason: "circuit_breaker" };
   if (dailyPnl <= -DAILY_LOSS_LIMIT()) return { allowed: false, reason: "daily_loss_limit" };
-  if (openPositions >= MAX_POSITIONS()) return { allowed: false, reason: "max_positions" };
+
+  // Caution tier: halve max positions
+  const effectiveMaxPositions = breakerTier === "caution" ? Math.max(1, Math.floor(MAX_POSITIONS() / 2)) : MAX_POSITIONS();
+  if (openPositions >= effectiveMaxPositions) return { allowed: false, reason: `max_positions${breakerTier === "caution" ? "_caution" : ""}` };
 
   // Check total exposure
   const exposure = getExposure();
@@ -187,9 +208,56 @@ export function recordTradeClose(pnl) {
   openPositions = Math.max(0, openPositions - 1);
   dailyPnl += pnl;
   totalPnl += pnl;
-  if (dailyPnl <= -DAILY_LOSS_LIMIT()) {
-    circuitBroken = true;
+
+  // Velocity tracking
+  if (pnl < 0) {
+    velocityWindow.push({ timestamp: Date.now(), pnl });
+    // Prune old entries
+    const cutoff = Date.now() - VELOCITY_WINDOW_MS;
+    while (velocityWindow.length > 0 && velocityWindow[0].timestamp < cutoff) velocityWindow.shift();
   }
+
+  // Multi-tier breaker evaluation
+  const limit = DAILY_LOSS_LIMIT();
+  const lossPct = limit > 0 ? Math.abs(dailyPnl) / limit : 0;
+
+  if (dailyPnl <= -limit) {
+    circuitBroken = true;
+    breakerTier = "tripped";
+    console.log(`[risk] CIRCUIT BREAKER: daily loss limit hit ($${dailyPnl.toFixed(2)} / -$${limit})`);
+  } else if (lossPct >= 0.75) {
+    breakerTier = "caution";
+    console.log(`[risk] CAUTION: 75% of daily loss limit ($${dailyPnl.toFixed(2)} / -$${limit})`);
+  } else if (lossPct >= 0.50) {
+    breakerTier = "warning";
+  } else {
+    breakerTier = dailyPnl < 0 ? "warning" : "none";
+    if (lossPct < 0.50) breakerTier = "none";
+  }
+
+  // Velocity check: sum losses in rolling window
+  const velocityLoss = velocityWindow.reduce((sum, v) => sum + v.pnl, 0);
+  const velocityThreshold = limit * VELOCITY_LOSS_THRESHOLD_PCT;
+  if (velocityLoss <= -velocityThreshold && !circuitBroken) {
+    circuitBroken = true;
+    breakerTier = "tripped";
+    console.log(`[risk] VELOCITY BREAKER: $${velocityLoss.toFixed(2)} lost in ${VELOCITY_WINDOW_MS / 60000}min (threshold: -$${velocityThreshold.toFixed(2)})`);
+  }
+
+  // Recovery mode tracking
+  if (recoveryMode) {
+    if (pnl > 0) {
+      recoveryWins++;
+      if (recoveryWins >= 2) {
+        recoveryMode = false;
+        recoveryWins = 0;
+        console.log("[risk] Recovery mode exited (2 consecutive wins)");
+      }
+    } else if (pnl < 0) {
+      recoveryWins = 0; // reset on any loss
+    }
+  }
+
   saveState();
 }
 
@@ -231,16 +299,29 @@ export function getExposure() {
   }
 }
 
+/**
+ * Get recovery mode sizing multiplier. Returns 0.5 during recovery, 1.0 otherwise.
+ */
+export function getRecoveryMultiplier() {
+  return recoveryMode ? 0.5 : 1.0;
+}
+
 export function getRiskStatus() {
   checkDayReset();
   const exposure = getExposure();
+  const limit = DAILY_LOSS_LIMIT();
   return {
     dailyPnl,
-    dailyLossLimit: DAILY_LOSS_LIMIT(),
+    dailyLossLimit: limit,
     openPositions,
     maxPositions: MAX_POSITIONS(),
     maxBet: MAX_BET(),
     circuitBroken,
+    breakerTier,
+    recoveryMode,
+    recoveryWins,
+    velocityLoss: velocityWindow.reduce((s, v) => s + v.pnl, 0),
+    velocityThreshold: limit * VELOCITY_LOSS_THRESHOLD_PCT,
     totalTrades,
     totalPnl,
     dailyResetDate,

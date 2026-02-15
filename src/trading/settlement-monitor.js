@@ -6,7 +6,7 @@
  * Places actual SELL orders when TRADING_DRY_RUN=false.
  */
 
-import { recordTradeClose } from "./risk-manager.js";
+import { recordTradeClose, recordTradeOpen } from "./risk-manager.js";
 import { placeSellOrderWithRetry } from "./clob-orders.js";
 import { closeExecution, getOpenExecutions } from "./execution-log.js";
 import { isMonitorActive, checkDrainComplete } from "./bot-control.js";
@@ -62,11 +62,13 @@ export function registerTrade({ signalId, marketId, tokenId, side, entryPrice, b
     side,
     entryPrice,
     betSize,
+    originalBetSize: betSize,        // original size before any partial exits
     dryRun: !!dryRun,
     executionId: executionId || null,
     openedAt: Date.now(),
-    highestPrice: entryPrice,       // peak price tracking for trailing stop
-    breakevenActivated: false        // becomes true once breakeven trigger hit
+    highestPrice: entryPrice,        // peak price tracking for trailing stop
+    breakevenActivated: false,       // becomes true once breakeven trigger hit
+    partialExitDone: false           // becomes true after first scale-out
   });
 }
 
@@ -139,6 +141,53 @@ async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
 }
 
 /**
+ * Execute a partial close (scale-out). Records P&L for the partial amount
+ * but keeps the trade open for the remainder.
+ */
+async function executePartialClose(trade, closeReason, currentPrice, pnlPct, pnlUsd, partialSize) {
+  // Record partial P&L in risk manager
+  recordTradeClose(pnlUsd);
+
+  // Place partial SELL for live trades
+  if (!trade.dryRun && !DRY_RUN) {
+    try {
+      await placeSellOrderWithRetry({ tokenId: trade.tokenId, amount: partialSize });
+    } catch (err) {
+      console.warn(`[settlement] Partial SELL error for signal #${trade.signalId}: ${err.message}`);
+    }
+  }
+
+  logAuditEvent("PARTIAL_EXIT", {
+    executionId: trade.executionId,
+    marketId: trade.marketId,
+    tokenId: trade.tokenId,
+    side: trade.side,
+    amount: partialSize,
+    price: currentPrice,
+    pnlUsd,
+    dryRun: trade.dryRun,
+    detail: { closeReason, pnlPct, remainingSize: trade.betSize - partialSize }
+  });
+
+  broadcastTradeEvent("PARTIAL_EXIT", {
+    executionId: trade.executionId,
+    marketId: trade.marketId,
+    side: trade.side,
+    closeReason,
+    exitPrice: currentPrice,
+    pnlPct,
+    pnlUsd,
+    partialSize,
+    remainingSize: Math.round((trade.betSize - partialSize) * 100) / 100,
+    dryRun: trade.dryRun
+  });
+
+  // Re-increment position count since we didn't fully close
+  // (recordTradeClose decremented it, but position is still open)
+  recordTradeOpen();
+}
+
+/**
  * Check all open trades for settlement, take-profit, stop-loss, trailing stop,
  * breakeven stop, and max hold time.
  */
@@ -194,8 +243,22 @@ async function checkOpenTrades() {
 
       if (settled) {
         closeReason = currentPrice >= 0.99 ? "SETTLED_WIN" : "SETTLED_LOSS";
-      } else if (pnlPct >= TAKE_PROFIT_PCT) {
-        closeReason = "TAKE_PROFIT";
+      } else if (pnlPct >= TAKE_PROFIT_PCT && !trade.partialExitDone) {
+        // First TP hit: scale out 50%, move stop to breakeven, let rest ride
+        const partialSize = Math.round(trade.betSize * 0.5 * 100) / 100;
+        if (partialSize >= 0.1) {
+          const partialPnlUsd = (pnlPct / 100) * partialSize;
+          await executePartialClose(trade, "PARTIAL_TP", currentPrice, pnlPct, partialPnlUsd, partialSize);
+          trade.betSize = Math.round((trade.betSize - partialSize) * 100) / 100;
+          trade.partialExitDone = true;
+          trade.breakevenActivated = true; // auto-activate breakeven for remainder
+          console.log(`[settlement] Scale-out 50%: closed $${partialSize.toFixed(2)}, remaining $${trade.betSize.toFixed(2)}, breakeven active`);
+          continue; // don't full-close this cycle
+        }
+        closeReason = "TAKE_PROFIT"; // too small to split, full close
+      } else if (pnlPct >= TAKE_PROFIT_PCT * 1.5 && trade.partialExitDone) {
+        // Second TP: 150% of target — close the remainder
+        closeReason = "TAKE_PROFIT_2";
       } else if (pnlPct <= STOP_LOSS_PCT) {
         closeReason = "STOP_LOSS";
       } else if (drawdownFromPeak >= TRAILING_STOP_PCT && pnlPct > 0) {
@@ -265,11 +328,13 @@ function rehydrateFromDb() {
         side: exec.side,
         entryPrice: exec.entry_price || exec.fill_price || 0.5,
         betSize: exec.amount,
+        originalBetSize: exec.amount,
         dryRun: !!exec.dry_run,
         executionId: exec.id,
         openedAt,
         highestPrice: exec.entry_price || exec.fill_price || 0.5,
-        breakevenActivated: false
+        breakevenActivated: false,
+        partialExitDone: false
       });
       rehydrated++;
     }
