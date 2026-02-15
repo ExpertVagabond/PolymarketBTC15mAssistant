@@ -137,6 +137,9 @@
   <div class="section-title">Admin — User Management</div>
   <div id="adminUserEndpoints"></div>
 
+  <div class="section-title">Trading Bot</div>
+  <div id="tradingEndpoints"></div>
+
   <div class="section-title">Admin — Performance & Maintenance</div>
   <div id="perfMaintenanceEndpoints"></div>
 
@@ -259,6 +262,11 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/admin/subscribers?plan=pro", desc: "List subscribers. Supports cursor: &before=ID. Returns { subscribers, nextCursor, hasMore }", tryable: true },
     { method: "POST", path: "/api/admin/grant-comp", desc: "Grant comp access. Body: { email, plan, days }" },
     { method: "GET", path: "/api/admin/cache-stats", desc: "Response cache hit rate and entry count", tryable: true }
+  ],
+  tradingEndpoints: [
+    { method: "GET", path: "/api/trading/status", desc: "Trading bot status: API config, risk state, monitor, execution stats", tryable: true },
+    { method: "GET", path: "/api/trading/executions?limit=10", desc: "Recent trade executions (live + dry-run) from SQLite", tryable: true },
+    { method: "GET", path: "/api/trading/open", desc: "Currently open trade executions", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

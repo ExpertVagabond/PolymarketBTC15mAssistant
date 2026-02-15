@@ -3,15 +3,18 @@
  * or when take-profit/stop-loss thresholds are hit.
  *
  * Integrates with risk-manager to properly decrement openPositions and track P&L.
- * Default: safe — only monitors, requires ENABLE_TRADING=true for live close orders.
+ * Places actual SELL orders when TRADING_DRY_RUN=false.
  */
 
 import { recordTradeClose } from "./risk-manager.js";
+import { placeSellOrder } from "./clob-orders.js";
+import { closeExecution } from "./execution-log.js";
 import { CONFIG } from "../config.js";
 
 const TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT) || 15;
 const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT) || -10;
 const CHECK_INTERVAL_MS = 60_000; // 1 minute
+const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
 
 // In-memory ledger of open trades (maps signal ID to trade info)
 const openTrades = new Map();
@@ -39,7 +42,7 @@ async function fetchTokenPrice(tokenId) {
  * Register a new trade for monitoring.
  * Called when bot.js opens a position (live or dry-run).
  */
-export function registerTrade({ signalId, marketId, tokenId, side, entryPrice, betSize, dryRun }) {
+export function registerTrade({ signalId, marketId, tokenId, side, entryPrice, betSize, dryRun, executionId }) {
   openTrades.set(signalId, {
     signalId,
     marketId,
@@ -48,8 +51,47 @@ export function registerTrade({ signalId, marketId, tokenId, side, entryPrice, b
     entryPrice,
     betSize,
     dryRun: !!dryRun,
+    executionId: executionId || null,
     openedAt: Date.now()
   });
+}
+
+/**
+ * Execute a close order (live or dry-run).
+ */
+async function executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd) {
+  // Update risk manager
+  recordTradeClose(pnlUsd);
+
+  // Update execution log if we have an execution ID
+  if (trade.executionId) {
+    try {
+      closeExecution(trade.executionId, { exitPrice: currentPrice, pnlUsd, pnlPct, closeReason });
+    } catch { /* non-fatal */ }
+  }
+
+  // Place actual SELL order for live trades (non-settled)
+  let sellResult = null;
+  if (!trade.dryRun && !DRY_RUN && closeReason !== "SETTLED_WIN" && closeReason !== "SETTLED_LOSS") {
+    try {
+      sellResult = await placeSellOrder({ tokenId: trade.tokenId, amount: trade.betSize });
+      if (!sellResult.ok) {
+        console.warn(`[settlement] SELL order failed for signal #${trade.signalId}: ${JSON.stringify(sellResult.data)}`);
+      }
+    } catch (err) {
+      console.warn(`[settlement] SELL order error for signal #${trade.signalId}: ${err.message}`);
+    }
+  }
+
+  console.log(
+    `[settlement] ${closeReason} | Signal #${trade.signalId} | ` +
+    `${trade.side} @ ${trade.entryPrice.toFixed(3)} -> ${currentPrice.toFixed(3)} | ` +
+    `P&L: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)}) | ` +
+    `${trade.dryRun ? "DRY RUN" : "LIVE"}` +
+    (sellResult ? ` | Sell: ${sellResult.ok ? "OK" : "FAILED"}` : "")
+  );
+
+  openTrades.delete(trade.signalId);
 }
 
 /**
@@ -85,18 +127,7 @@ async function checkOpenTrades() {
 
       if (closeReason) {
         const pnlUsd = (pnlPct / 100) * trade.betSize;
-
-        // Update risk manager
-        recordTradeClose(pnlUsd);
-
-        console.log(
-          `[settlement] ${closeReason} | Signal #${signalId} | ` +
-          `${trade.side} @ ${trade.entryPrice.toFixed(3)} -> ${currentPrice.toFixed(3)} | ` +
-          `P&L: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}% ($${pnlUsd.toFixed(2)}) | ` +
-          `${trade.dryRun ? "DRY RUN" : "LIVE"}`
-        );
-
-        openTrades.delete(signalId);
+        await executeClose(trade, closeReason, currentPrice, pnlPct, pnlUsd);
       }
     } catch (err) {
       // Silently skip failed checks — will retry next cycle
@@ -137,6 +168,7 @@ export function getMonitorStatus() {
       side: t.side,
       entryPrice: t.entryPrice,
       dryRun: t.dryRun,
+      executionId: t.executionId,
       ageMinutes: Math.round((Date.now() - t.openedAt) / 60_000)
     })),
     takeProfitPct: TAKE_PROFIT_PCT,

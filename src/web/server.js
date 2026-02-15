@@ -44,6 +44,10 @@ import { getCacheStats, cachedResponse } from "./cache.js";
 import { startTrialReminderSchedule } from "../subscribers/trial-reminders.js";
 import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "../maintenance/scheduler.js";
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
+import { getRiskStatus } from "../trading/risk-manager.js";
+import { getMonitorStatus } from "../trading/settlement-monitor.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions } from "../trading/execution-log.js";
+import { isTradingConfigured } from "../trading/clob-auth.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -720,6 +724,26 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.post("/api/admin/maintenance/run", { preHandler: requireAuth }, async () => {
     return runMaintenance();
+  });
+
+  /* ── Trading Status API ── */
+
+  app.get("/api/trading/status", async () => {
+    return {
+      configured: isTradingConfigured(),
+      risk: getRiskStatus(),
+      monitor: getMonitorStatus(),
+      executionStats: getExecutionStats()
+    };
+  });
+
+  app.get("/api/trading/executions", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getRecentExecutions(limit);
+  });
+
+  app.get("/api/trading/open", async () => {
+    return getOpenExecutions();
   });
 
   /* ── API Key Auth (X-API-Key header) ── */

@@ -164,6 +164,12 @@
       <button style="margin-top:8px;padding:4px 12px;font-size:11px;background:#1e1e2a;border:1px solid #2d2d3a;color:#a5b4fc;border-radius:6px;cursor:pointer" onclick="runMaintenance()">Run Now</button>
     </div>
 
+    <!-- Trading Status -->
+    <div class="card wide">
+      <div class="card-title">Trading Bot</div>
+      <div id="tradingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
@@ -215,7 +221,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -224,7 +230,8 @@ async function loadAdmin() {
       fetch("/api/admin/delivery-stats").then(r => r.json()).catch(() => null),
       fetch("/api/admin/cache-stats").then(r => r.json()).catch(() => null),
       fetch("/api/admin/perf").then(r => r.json()).catch(() => null),
-      fetch("/api/admin/maintenance").then(r => r.json()).catch(() => null)
+      fetch("/api/admin/maintenance").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/status").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -236,6 +243,7 @@ async function loadAdmin() {
     if (cacheStats) renderCacheStats(cacheStats);
     if (perf) renderPerfStats(perf);
     if (maint) renderMaintenance(maint);
+    if (trading) renderTrading(trading);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -478,6 +486,36 @@ async function grantComp() {
     const el = $("compResult");
     if (el) { el.textContent = "Error: " + err.message; el.style.display = "block"; el.style.color = "#f87171"; }
   }
+}
+
+function renderTrading(t) {
+  const el = $("tradingBlock");
+  if (!el) return;
+  const r = t.risk || {};
+  const m = t.monitor || {};
+  const e = t.executionStats || {};
+  const cbColor = r.circuitBroken ? "red" : "green";
+  const pnlColor = r.dailyPnl >= 0 ? "green" : "red";
+  let html = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="kv"><span class="k">API</span><span class="v ${t.configured ? "green" : "red"}">${t.configured ? "Configured" : "Not Set"}</span></div>
+      <div class="kv"><span class="k">Circuit</span><span class="v ${cbColor}">${r.circuitBroken ? "BROKEN" : "OK"}</span></div>
+      <div class="kv"><span class="k">Monitor</span><span class="v ${m.running ? "green" : "amber"}">${m.running ? "Running" : "Stopped"}</span></div>
+    </div>
+    <div class="kv"><span class="k">Daily P&L</span><span class="v ${pnlColor}">$${(r.dailyPnl || 0).toFixed(2)} / -$${r.dailyLossLimit || 0} limit</span></div>
+    <div class="kv"><span class="k">Open Positions</span><span class="v">${r.openPositions || 0} / ${r.maxPositions || 0}</span></div>
+    <div class="kv"><span class="k">Total Trades</span><span class="v blue">${r.totalTrades || 0} (${e.live_trades || 0} live, ${e.dry_runs || 0} dry)</span></div>
+    <div class="kv"><span class="k">Total P&L</span><span class="v ${(r.totalPnl || 0) >= 0 ? "green" : "red"}">$${(r.totalPnl || 0).toFixed(2)}</span></div>
+    <div class="kv"><span class="k">Win/Loss</span><span class="v">${e.wins || 0}W / ${e.losses || 0}L</span></div>
+    <div class="kv"><span class="k">TP / SL</span><span class="v">+${m.takeProfitPct || 0}% / ${m.stopLossPct || 0}%</span></div>
+  `;
+  if (m.trades && m.trades.length > 0) {
+    html += '<div style="margin-top:8px;font-size:10px;color:#4b5563">Open trades:</div>';
+    for (const tr of m.trades) {
+      html += `<div style="font-size:10px;color:#9ca3af;padding:2px 0">${esc(tr.side)} ${esc(tr.marketId?.slice(0,12))} @ ${tr.entryPrice?.toFixed(3)} (${tr.ageMinutes}m) ${tr.dryRun ? "[DRY]" : "[LIVE]"}</div>`;
+    }
+  }
+  el.innerHTML = html;
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }
