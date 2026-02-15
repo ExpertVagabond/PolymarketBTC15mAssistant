@@ -799,6 +799,100 @@ export function simulateStrategy(filters = {}) {
 }
 
 /**
+ * Walk-forward validation: split data into train (70%) and test (30%) windows.
+ * Returns in-sample and out-of-sample metrics to detect overfitting.
+ */
+export function walkForwardValidation(filters = {}) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  let settled = db.prepare(`
+    SELECT * FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL
+    ORDER BY created_at ASC
+  `).all();
+
+  // Apply same filters as simulateStrategy
+  if (filters.minConfidence != null) settled = settled.filter(s => (s.confidence ?? 0) >= filters.minConfidence);
+  if (filters.maxConfidence != null) settled = settled.filter(s => (s.confidence ?? 100) <= filters.maxConfidence);
+  if (filters.categories?.length) {
+    const cats = new Set(filters.categories.map(c => c.toLowerCase()));
+    settled = settled.filter(s => cats.has((s.category || "").toLowerCase()));
+  }
+  if (filters.strengths?.length) {
+    const str = new Set(filters.strengths.map(s => s.toUpperCase()));
+    settled = settled.filter(s => str.has((s.strength || "").toUpperCase()));
+  }
+  if (filters.minEdge != null) settled = settled.filter(s => (s.edge ?? 0) >= filters.minEdge);
+  if (filters.sides?.length) {
+    const sides = new Set(filters.sides.map(s => s.toUpperCase()));
+    settled = settled.filter(s => sides.has((s.side || "").toUpperCase()));
+  }
+
+  if (settled.length < 10) {
+    return { error: "insufficient_data", total: settled.length, message: "Need at least 10 settled signals for walk-forward validation" };
+  }
+
+  const splitIdx = Math.floor(settled.length * 0.7);
+  const trainSet = settled.slice(0, splitIdx);
+  const testSet = settled.slice(splitIdx);
+
+  function computeMetrics(signals) {
+    let wins = 0, losses = 0, cumPnl = 0, peak = 0, maxDD = 0;
+    const pnls = [];
+    for (const s of signals) {
+      if (s.outcome === "WIN") wins++; else losses++;
+      const pnl = s.pnl_pct || 0;
+      pnls.push(pnl);
+      cumPnl += pnl;
+      if (cumPnl > peak) peak = cumPnl;
+      const dd = peak - cumPnl;
+      if (dd > maxDD) maxDD = dd;
+    }
+    const total = wins + losses;
+    const winRate = total > 0 ? +(wins / total * 100).toFixed(1) : null;
+    const avgPnl = pnls.length > 0 ? +(pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(2) : null;
+    let sharpe = null;
+    if (pnls.length > 1) {
+      const mean = pnls.reduce((a, b) => a + b, 0) / pnls.length;
+      const std = Math.sqrt(pnls.reduce((sum, p) => sum + (p - mean) ** 2, 0) / (pnls.length - 1));
+      sharpe = std > 0 ? +((mean / std)).toFixed(2) : null;
+    }
+    return { total, wins, losses, winRate, totalPnl: +cumPnl.toFixed(2), avgPnl, sharpe, maxDrawdown: +maxDD.toFixed(2) };
+  }
+
+  const inSample = computeMetrics(trainSet);
+  const outOfSample = computeMetrics(testSet);
+
+  // Overfitting detection
+  const isWinRate = parseFloat(inSample.winRate) || 0;
+  const oosWinRate = parseFloat(outOfSample.winRate) || 0;
+  const winRateDrop = isWinRate - oosWinRate;
+  const sharpeDrop = (inSample.sharpe || 0) - (outOfSample.sharpe || 0);
+  const overfitRisk = winRateDrop > 10 ? "HIGH" : winRateDrop > 5 ? "MEDIUM" : "LOW";
+
+  return {
+    totalSignals: settled.length,
+    trainSize: trainSet.length,
+    testSize: testSet.length,
+    splitRatio: "70/30",
+    trainPeriod: { from: trainSet[0]?.created_at, to: trainSet[trainSet.length - 1]?.created_at },
+    testPeriod: { from: testSet[0]?.created_at, to: testSet[testSet.length - 1]?.created_at },
+    inSample,
+    outOfSample,
+    overfitting: {
+      winRateDrop: +winRateDrop.toFixed(1),
+      sharpeDrop: +sharpeDrop.toFixed(2),
+      risk: overfitRisk,
+      recommendation: overfitRisk === "HIGH" ? "Strategy likely overfit — OOS performance significantly worse. Consider simplifying filters."
+        : overfitRisk === "MEDIUM" ? "Some degradation in OOS. Monitor closely."
+        : "Strategy generalizes well to unseen data."
+    },
+    filters
+  };
+}
+
+/**
  * Get a single signal by ID.
  */
 export function getSignalById(id) {

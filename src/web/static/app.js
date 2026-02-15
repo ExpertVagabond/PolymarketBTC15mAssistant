@@ -867,10 +867,13 @@ function renderKPIs(stats, dd, perf) {
   $("kpiAvgConf").textContent = perf.avg_confidence != null ? Math.round(perf.avg_confidence) : "-";
 }
 
+let equityCurveDates = []; // store dates for drill-down
+
 function renderEquityChart(dd) {
   const curve = dd.equityCurve || [];
   if (curve.length === 0) return;
 
+  equityCurveDates = curve.map(p => p.date);
   const labels = curve.map(p => {
     const d = new Date(p.date);
     return (d.getMonth() + 1) + "/" + d.getDate();
@@ -884,12 +887,63 @@ function renderEquityChart(dd) {
     data: {
       labels,
       datasets: [
-        { label: "Cumulative P&L %", data, borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.greenBg, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+        { label: "Cumulative P&L %", data, borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.greenBg, fill: true, tension: 0.3, pointRadius: 2, pointHoverRadius: 5, borderWidth: 2 },
         { label: "Drawdown %", data: drawdowns, borderColor: CHART_COLORS.red, backgroundColor: CHART_COLORS.redBg, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1 }
       ]
     },
-    options: { ...CHART_DEFAULTS, plugins: { ...CHART_DEFAULTS.plugins, legend: { display: true, labels: { color: "#6b7280", font: { size: 10 } } } } }
+    options: {
+      ...CHART_DEFAULTS,
+      onClick: (evt, elements) => {
+        if (elements.length > 0) {
+          const idx = elements[0].index;
+          const date = equityCurveDates[idx];
+          if (date) showDayDrillDown(date);
+        }
+      },
+      plugins: { ...CHART_DEFAULTS.plugins, legend: { display: true, labels: { color: "#6b7280", font: { size: 10 } } },
+        tooltip: { ...CHART_DEFAULTS.plugins.tooltip, callbacks: { afterLabel: () => "Click to view trades" } }
+      }
+    }
   });
+}
+
+async function showDayDrillDown(date) {
+  try {
+    const signals = await fetch("/api/signals/by-date?date=" + date).then(r => r.json());
+    if (signals.error) return;
+
+    const modal = $("signalModalContent");
+    const settled = signals.filter(s => s.outcome != null);
+    const wins = settled.filter(s => s.outcome === "WIN").length;
+    const losses = settled.filter(s => s.outcome === "LOSS").length;
+
+    modal.innerHTML = `
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <h3>Trades on ${esc(date)}</h3>
+      <div class="modal-sub">${signals.length} signals | ${wins}W / ${losses}L | ${settled.length ? Math.round(wins / settled.length * 100) : 0}% win rate</div>
+      <div class="modal-section">
+        ${signals.length === 0 ? '<div style="color:#4b5563;text-align:center;padding:20px">No signals on this date</div>' :
+          signals.map(s => {
+            const side = s.side === "UP" ? "YES" : "NO";
+            const sideColor = s.side === "UP" ? "#34d399" : "#f87171";
+            const edge = s.edge != null ? "+" + (s.edge * 100).toFixed(1) + "%" : "-";
+            const pnl = s.pnl_pct != null ? (s.pnl_pct >= 0 ? "+" : "") + (s.pnl_pct * 100).toFixed(1) + "%" : "-";
+            const pnlColor = (s.pnl_pct ?? 0) >= 0 ? "#34d399" : "#f87171";
+            const outcomeClass = s.outcome === "WIN" ? "win" : s.outcome === "LOSS" ? "loss" : "";
+            return `<div style="padding:8px 0;border-bottom:1px solid #141420;display:flex;align-items:center;gap:10px">
+              <span style="color:${sideColor};font-weight:700;font-size:11px;width:36px">${side}</span>
+              <span style="flex:1;font-size:12px;color:#d1d5db;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((s.question || "").slice(0, 50))}</span>
+              <span style="font-size:11px;color:#6b7280">${edge}</span>
+              <span style="font-size:11px;font-weight:600" class="${outcomeClass}">${s.outcome || "OPEN"}</span>
+              <span style="font-size:11px;font-weight:600;color:${pnlColor}">${pnl}</span>
+            </div>`;
+          }).join("")
+        }
+      </div>`;
+    $("signalModal").classList.add("open");
+  } catch (err) {
+    console.error("[drill-down]", err);
+  }
 }
 
 function renderWinRateChart(ts) {
@@ -1013,16 +1067,18 @@ function renderVolumeChart(ts) {
 
 async function loadPortfolio() {
   try {
-    const [summary, positions, recent, predictions] = await Promise.all([
+    const [summary, positions, recent, predictions, riskData] = await Promise.all([
       fetch("/api/portfolio/summary").then(r => r.json()),
       fetch("/api/portfolio/positions").then(r => r.json()),
       fetch("/api/portfolio/recent?limit=30").then(r => r.json()),
-      fetch("/api/portfolio/predictions").then(r => r.json()).catch(() => [])
+      fetch("/api/portfolio/predictions").then(r => r.json()).catch(() => []),
+      fetch("/api/portfolio/risk").then(r => r.json()).catch(() => null)
     ]);
 
     renderPortfolioKPIs(summary);
     renderOpenPositions(positions, predictions);
     renderRecentTrades(recent);
+    renderPortfolioRisk(riskData);
     portfolioLoaded = true;
   } catch (err) {
     console.error("[portfolio] Load failed:", err);
@@ -1097,6 +1153,43 @@ function renderRecentTrades(trades) {
         <td style="color:#4b5563">${closedAt}</td>
       </tr>`;
     }).join("");
+}
+
+function renderPortfolioRisk(data) {
+  const el = $("portfolioRiskBlock");
+  if (!el || !data || data.error) { if (el) el.innerHTML = ""; return; }
+
+  const concColor = data.concentrationRisk === "HIGH" ? "#f87171" : data.concentrationRisk === "MEDIUM" ? "#fbbf24" : "#34d399";
+  const concBg = data.concentrationRisk === "HIGH" ? "#f8717118" : data.concentrationRisk === "MEDIUM" ? "#fbbf2418" : "#34d39918";
+
+  const concRows = (data.concentration || []).slice(0, 6).map(c =>
+    `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <span style="font-size:11px;color:#9ca3af;width:80px;flex-shrink:0">${esc(c.category)}</span>
+      <div style="flex:1;height:6px;background:#1a1a24;border-radius:3px;overflow:hidden">
+        <div style="width:${Math.min(c.exposurePct, 100)}%;height:100%;background:#60a5fa;border-radius:3px"></div>
+      </div>
+      <span style="font-size:11px;color:#e5e7eb;font-weight:600;width:36px;text-align:right">${c.exposurePct.toFixed(0)}%</span>
+    </div>`
+  ).join("");
+
+  const se = data.sideExposure || {};
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+        <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">Concentration Risk</div>
+        <div style="font-size:16px;font-weight:700;color:${concColor}">${data.concentrationRisk}</div>
+        <div style="font-size:10px;color:#4b5563">HHI: ${data.hhi != null ? data.hhi.toFixed(3) : "-"}</div>
+      </div>
+      <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+        <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">Side Exposure</div>
+        <div style="font-size:13px;font-weight:700"><span style="color:#34d399">YES ${se.yesPct ?? 0}%</span> / <span style="color:#f87171">NO ${se.noPct ?? 0}%</span></div>
+        <div style="font-size:10px;color:#4b5563">${data.openPositions ?? 0} open positions</div>
+      </div>
+    </div>
+    <div style="font-size:10px;font-weight:700;color:#4b5563;text-transform:uppercase;margin-bottom:6px">Category Concentration</div>
+    ${concRows || '<div style="color:#4b5563;font-size:11px">No positions</div>'}
+    ${data.maxSinglePosition ? `<div style="margin-top:8px;font-size:11px;color:#6b7280">Max single position: <span style="color:#fbbf24;font-weight:600">${(data.maxSinglePosition.exposurePct || 0).toFixed(1)}%</span> in ${esc((data.maxSinglePosition.question || "").slice(0, 40))}</div>` : ""}
+  `;
 }
 
 async function renderSettledTable() {
@@ -1212,9 +1305,13 @@ async function runSimulation() {
     if (simSelectedStr !== "all") params.set("strengths", simSelectedStr);
     if (simSelectedSide !== "all") params.set("sides", simSelectedSide);
 
-    const res = await fetch("/api/simulate?" + params.toString());
+    const [res, wfRes] = await Promise.all([
+      fetch("/api/simulate?" + params.toString()),
+      fetch("/api/simulate/walk-forward?" + params.toString()).catch(() => null)
+    ]);
     const data = await res.json();
-    renderSimResults(data);
+    const wfData = wfRes ? await wfRes.json().catch(() => null) : null;
+    renderSimResults(data, wfData);
   } catch (err) {
     $("simResults").innerHTML = `<div class="sim-empty" style="color:#f87171">Simulation failed: ${esc(err.message)}</div>`;
   } finally {
@@ -1223,7 +1320,7 @@ async function runSimulation() {
   }
 }
 
-function renderSimResults(data) {
+function renderSimResults(data, wfData) {
   if (data.total === 0) {
     $("simResults").innerHTML = `<div class="sim-empty">${data.message || "No settled signals match your filters."}</div>`;
     return;
@@ -1267,6 +1364,43 @@ function renderSimResults(data) {
       </div>
     </div>`;
 
+  // Walk-forward validation results
+  let wfHtml = "";
+  if (wfData && !wfData.error && wfData.outOfSample) {
+    const oos = wfData.outOfSample;
+    const ins = wfData.inSample;
+    const of = wfData.overfitting || {};
+    const riskColor = of.risk === "HIGH" ? "#f87171" : of.risk === "MEDIUM" ? "#fbbf24" : "#34d399";
+    const riskBg = of.risk === "HIGH" ? "#f8717118" : of.risk === "MEDIUM" ? "#fbbf2418" : "#34d39918";
+    wfHtml = `
+    <div style="background:#12121a;border:1px solid #1e1e2a;border-radius:8px;padding:14px 18px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">Walk-Forward Validation</span>
+        <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:${riskBg};color:${riskColor}">${of.risk || "?"} OVERFIT RISK</span>
+        <span style="font-size:10px;color:#4b5563;margin-left:auto">${wfData.trainSize || 0} train / ${wfData.testSize || 0} test signals</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">In-Sample Win Rate</div>
+          <div style="font-size:16px;font-weight:700;color:${(ins.winRate ?? 0) >= 50 ? '#34d399' : '#f87171'}">${ins.winRate != null ? ins.winRate + "%" : "-"}</div>
+        </div>
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">Out-of-Sample Win Rate</div>
+          <div style="font-size:16px;font-weight:700;color:${(oos.winRate ?? 0) >= 50 ? '#34d399' : '#f87171'}">${oos.winRate != null ? oos.winRate + "%" : "-"}</div>
+        </div>
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">In-Sample Sharpe</div>
+          <div style="font-size:16px;font-weight:700;color:#e5e7eb">${ins.sharpe != null ? ins.sharpe.toFixed(2) : "-"}</div>
+        </div>
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase;margin-bottom:4px">Out-of-Sample Sharpe</div>
+          <div style="font-size:16px;font-weight:700;color:#e5e7eb">${oos.sharpe != null ? oos.sharpe.toFixed(2) : "-"}</div>
+        </div>
+      </div>
+      ${of.recommendation ? `<div style="font-size:11px;color:#6b7280;margin-top:10px;padding:8px 10px;background:#0e0e16;border-radius:4px">${esc(of.recommendation)}</div>` : ""}
+    </div>`;
+  }
+
   // Equity curve
   const curve = data.equityCurve || [];
   const chartHtml = curve.length > 0 ? `
@@ -1275,7 +1409,7 @@ function renderSimResults(data) {
       <div class="analytics-chart"><canvas id="simEquityCanvas"></canvas></div>
     </div>` : "";
 
-  $("simResults").innerHTML = kpiHtml + chartHtml;
+  $("simResults").innerHTML = kpiHtml + wfHtml + chartHtml;
 
   if (curve.length > 0) {
     if (simEquityChart) simEquityChart.destroy();
@@ -1644,6 +1778,7 @@ async function loadSettings() {
       loadApiKeys();
       loadWebhooks();
       loadEmailPrefs();
+      loadDeliveryAudit();
     }
   } catch { /* not logged in */ }
 
@@ -1652,6 +1787,49 @@ async function loadSettings() {
 
   // Init email category checkboxes
   initEmailCategories();
+}
+
+async function loadDeliveryAudit() {
+  const el = $("deliveryAuditBlock");
+  if (!el) return;
+  try {
+    const data = await fetch("/api/notifications/delivery-audit").then(r => r.json());
+    if (data.error || !data.recent) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No delivery data yet</div>'; return; }
+
+    const stats = data.stats || {};
+    const recent = (data.recent || []).slice(0, 10);
+    const successRate = stats.total > 0 ? Math.round((stats.delivered / stats.total) * 100) : 0;
+    const srColor = successRate >= 90 ? "#34d399" : successRate >= 70 ? "#fbbf24" : "#f87171";
+
+    el.innerHTML = `
+      <div style="display:flex;gap:12px;margin-bottom:10px">
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:8px 12px;text-align:center;flex:1">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase">Success Rate</div>
+          <div style="font-size:16px;font-weight:700;color:${srColor}">${successRate}%</div>
+        </div>
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:8px 12px;text-align:center;flex:1">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase">Total</div>
+          <div style="font-size:16px;font-weight:700;color:#e5e7eb">${stats.total || 0}</div>
+        </div>
+        <div style="background:#0e0e16;border:1px solid #1a1a24;border-radius:6px;padding:8px 12px;text-align:center;flex:1">
+          <div style="font-size:9px;color:#4b5563;text-transform:uppercase">Failed</div>
+          <div style="font-size:16px;font-weight:700;color:#f87171">${stats.failed || 0}</div>
+        </div>
+      </div>
+      ${recent.length > 0 ? recent.map(r => {
+        const statusColor = r.status === "delivered" ? "#34d399" : r.status === "failed" ? "#f87171" : r.status === "throttled" ? "#fbbf24" : "#6b7280";
+        const time = r.created_at ? new Date(r.created_at).toLocaleTimeString() : "-";
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #141420;font-size:11px">
+          <span style="color:#4b5563;width:60px">${time}</span>
+          <span style="color:#9ca3af;flex:1">${esc(r.channel || "-")}</span>
+          <span style="color:${statusColor};font-weight:600">${r.status}</span>
+          ${r.latency_ms ? `<span style="color:#4b5563">${r.latency_ms}ms</span>` : ""}
+        </div>`;
+      }).join("") : '<div style="color:#4b5563;font-size:11px">No recent deliveries</div>'}
+    `;
+  } catch {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Login to view delivery audit</div>';
+  }
 }
 
 async function settingsLogin() {

@@ -116,6 +116,15 @@
   <div class="section-title">Admin — Webhook Queue</div>
   <div id="webhookQueueEndpoints"></div>
 
+  <div class="section-title">Portfolio Intelligence</div>
+  <div id="portfolioIntelEndpoints"></div>
+
+  <div class="section-title">Notification Delivery</div>
+  <div id="deliveryEndpoints"></div>
+
+  <div class="section-title">Walk-Forward Validation</div>
+  <div id="walkForwardEndpoints"></div>
+
   <div class="section-title">Observability — Error Logs</div>
   <div id="logsEndpoints"></div>
 
@@ -207,6 +216,17 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/admin/webhook-queue", desc: "Webhook delivery queue status and recent entries", tryable: true },
     { method: "POST", path: "/api/admin/webhook-queue/replay/:id", desc: "Replay a failed webhook delivery" },
     { method: "POST", path: "/api/admin/webhook-queue/purge?days=7", desc: "Purge old delivered/failed queue entries" }
+  ],
+  portfolioIntelEndpoints: [
+    { method: "GET", path: "/api/portfolio/risk", desc: "Portfolio risk attribution: concentration (HHI), side exposure, max single position, drawdown attribution", tryable: true }
+  ],
+  deliveryEndpoints: [
+    { method: "GET", path: "/api/notifications/delivery-audit", desc: "Per-user notification delivery audit log (auth required)" },
+    { method: "GET", path: "/api/admin/delivery-stats", desc: "Global delivery health: success/fail/throttle rates over N days", tryable: true }
+  ],
+  walkForwardEndpoints: [
+    { method: "GET", path: "/api/simulate/walk-forward?minConfidence=60", desc: "Walk-forward validation: 70/30 train/test split with overfitting detection (Pro)", tryable: true },
+    { method: "GET", path: "/api/signals/by-date?date=2026-02-15", desc: "All signals for a specific date (for equity curve drill-down)", tryable: true }
   ],
   logsEndpoints: [
     { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },

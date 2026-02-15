@@ -22,7 +22,7 @@ import { getByEmail, getStats as getSubStats } from "../subscribers/manager.js";
 import { grantChannelAccess } from "../bots/telegram/access.js";
 import { grantPremiumRole } from "../bots/discord/access.js";
 import { linkTelegram, linkDiscord } from "../subscribers/manager.js";
-import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, getLeaderboard, getSignalById, getRegimeAnalytics } from "../signals/history.js";
+import { getRecentSignals, getSignalStats, getFeatureWinRates, getComboWinRates, getTimeSeries, getCalibration, getDrawdownStats, exportSignals, getMarketStats, getPerformanceSummary, simulateStrategy, walkForwardValidation, getLeaderboard, getSignalById, getRegimeAnalytics } from "../signals/history.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
 import { getOpenPositions, getPortfolioSummary, getRecentPositions } from "../portfolio/tracker.js";
 import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-keys.js";
@@ -33,6 +33,9 @@ import { getEdgeAudit } from "../signals/edge-audit.js";
 import { predictOpenPositions } from "../signals/settlement-predictor.js";
 import { getDriftStatus, setBaseline, acknowledgeBaseline } from "../engines/model-drift-detector.js";
 import { getQueueStatus, getRecentQueue, replayDelivery, startQueueProcessor, purgeQueue } from "../notifications/webhook-queue.js";
+import { getPortfolioRisk } from "../portfolio/risk-attribution.js";
+import { getUserDeliveryAudit, getGlobalDeliveryStats } from "../notifications/delivery-audit.js";
+import { extractPlan, getPlanLimits, planRequired } from "./plan-gates.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -191,8 +194,11 @@ export async function startWebServer(opts = {}) {
   /* ── Signal History API ── */
 
   app.get("/api/signals/recent", async (req) => {
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
-    return getRecentSignals(limit);
+    const plan = extractPlan(req);
+    const limits = getPlanLimits(plan);
+    const limit = Math.min(Number(req.query.limit) || 50, limits.recentSignalsLimit);
+    const signals = getRecentSignals(limit);
+    return plan === "free" ? signals.map(s => ({ ...s, kelly_bet_pct: undefined })) : signals;
   });
 
   app.get("/api/signals/stats", async () => {
@@ -230,6 +236,8 @@ export async function startWebServer(opts = {}) {
   });
 
   app.get("/api/analytics/export", async (req) => {
+    const plan = extractPlan(req);
+    if (!getPlanLimits(plan).analyticsExport) return planRequired("pro");
     const opts = {
       days: req.query.days ? Number(req.query.days) : undefined,
       category: req.query.category || undefined,
@@ -259,6 +267,8 @@ export async function startWebServer(opts = {}) {
   /* ── Strategy Simulator API ── */
 
   app.get("/api/simulate", async (req) => {
+    const plan = extractPlan(req);
+    if (!getPlanLimits(plan).simulatorAccess) return planRequired("pro");
     const filters = {};
     if (req.query.minConfidence) filters.minConfidence = Number(req.query.minConfidence);
     if (req.query.maxConfidence) filters.maxConfidence = Number(req.query.maxConfidence);
@@ -267,6 +277,21 @@ export async function startWebServer(opts = {}) {
     if (req.query.minEdge) filters.minEdge = Number(req.query.minEdge);
     if (req.query.sides) filters.sides = req.query.sides.split(",");
     return simulateStrategy(filters);
+  });
+
+  /* ── Walk-Forward Validation API ── */
+
+  app.get("/api/simulate/walk-forward", async (req) => {
+    const plan = extractPlan(req);
+    if (!getPlanLimits(plan).simulatorAccess) return planRequired("pro");
+    const filters = {};
+    if (req.query.minConfidence) filters.minConfidence = Number(req.query.minConfidence);
+    if (req.query.maxConfidence) filters.maxConfidence = Number(req.query.maxConfidence);
+    if (req.query.categories) filters.categories = req.query.categories.split(",");
+    if (req.query.strengths) filters.strengths = req.query.strengths.split(",");
+    if (req.query.minEdge) filters.minEdge = Number(req.query.minEdge);
+    if (req.query.sides) filters.sides = req.query.sides.split(",");
+    return walkForwardValidation(filters);
   });
 
   /* ── Strategy Library API ── */
@@ -513,6 +538,32 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/logs/trends", async (req) => {
     return getErrorTrends(Number(req.query.days) || 7);
+  });
+
+  /* ── Portfolio Risk API ── */
+
+  app.get("/api/portfolio/risk", async () => {
+    return getPortfolioRisk();
+  });
+
+  /* ── Signals by Date API ── */
+
+  app.get("/api/signals/by-date", async (req) => {
+    const date = req.query.date;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "provide ?date=YYYY-MM-DD" };
+    return getRecentSignals(500).filter(s => s.created_at && s.created_at.startsWith(date));
+  });
+
+  /* ── Delivery Audit API ── */
+
+  app.get("/api/notifications/delivery-audit", { preHandler: requireAuth }, async (req) => {
+    const email = req.sessionUser?.email;
+    if (!email) return { error: "no_email" };
+    return getUserDeliveryAudit(email);
+  });
+
+  app.get("/api/admin/delivery-stats", async () => {
+    return getGlobalDeliveryStats(7);
   });
 
   /* ── Edge Audit API ── */

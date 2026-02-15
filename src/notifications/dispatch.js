@@ -13,6 +13,7 @@
 
 import { getDb } from "../subscribers/db.js";
 import { enqueueWebhook } from "./webhook-queue.js";
+import { recordDelivery } from "./delivery-audit.js";
 
 let stmts = null;
 
@@ -174,6 +175,7 @@ export async function dispatchWebhooks(tick) {
   for (const wh of webhooks) {
     // Enqueue for durable delivery with retry instead of fire-and-forget
     enqueueWebhook(wh.id, wh.url, payload);
+    recordDelivery({ email: wh.email, channel: "webhook", signalId: tick.signalId, status: "queued" });
   }
 }
 
@@ -236,11 +238,16 @@ export async function dispatchEmailAlerts(tick, resendClient) {
     const maxPerHour = pref.max_alerts_per_hour ?? DEFAULT_MAX_PER_HOUR;
     if (isThrottled(pref.email, maxPerHour)) {
       queueForDigest(pref.email, tick);
+      recordDelivery({ email: pref.email, channel: "email", signalId: tick.signalId, status: "throttled" });
       continue;
     }
 
     recordSent(pref.email);
-    sendEmailAlert(pref.email, tick, resendClient).catch(err => {
+    const emailStart = Date.now();
+    sendEmailAlert(pref.email, tick, resendClient).then(() => {
+      recordDelivery({ email: pref.email, channel: "email", signalId: tick.signalId, status: "delivered", latencyMs: Date.now() - emailStart });
+    }).catch(err => {
+      recordDelivery({ email: pref.email, channel: "email", signalId: tick.signalId, status: "failed", error: err.message });
       console.error(`[email-alert] Failed for ${pref.email}:`, err.message);
     });
   }
