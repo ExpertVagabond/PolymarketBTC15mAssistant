@@ -196,6 +196,12 @@
       <div id="attributionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Category Intelligence -->
+    <div class="card">
+      <div class="card-title">Category Intelligence</div>
+      <div id="categoryBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Signal Filters -->
     <div class="card">
       <div class="card-title">Signal Filters</div>
@@ -271,7 +277,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -289,7 +295,8 @@ async function loadAdmin() {
       fetch("/api/trading/hourly-stats").then(r => r.json()).catch(() => []),
       fetch("/api/trading/filter-stats").then(r => r.json()).catch(() => null),
       fetch("/api/trading/audit?days=1&limit=25").then(r => r.json()).catch(() => []),
-      fetch("/api/trading/attribution?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/attribution?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/category-weights").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -308,6 +315,7 @@ async function loadAdmin() {
     if (filterStatsData) renderFilterStats(filterStatsData);
     if (auditEvents) renderAuditTimeline(auditEvents);
     if (attribution) renderAttribution(attribution);
+    if (categoryWeights) renderCategoryIntel(categoryWeights);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -834,6 +842,45 @@ function renderAttribution(a) {
   el.innerHTML = html || '<div style="color:#4b5563;font-size:12px">No attribution data yet</div>';
 }
 
+function renderCategoryIntel(data) {
+  const el = $("categoryBlock");
+  if (!el) return;
+  let html = '';
+
+  // Category confidence & Kelly adjustments table
+  const confAdj = { crypto: "+5", Bitcoin: "+5", Ethereum: "+5", Sports: "-5", Esports: "-5", Tennis: "-5", Politics: "-5", Weather: "-3", Economics: "-3" };
+  const kellyMult = { crypto: "1.0x", Bitcoin: "1.0x", Ethereum: "1.0x", Sports: "0.8x", Esports: "0.8x", Tennis: "0.8x", Politics: "0.7x", Weather: "0.6x", Economics: "0.7x" };
+
+  html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-bottom:4px">CATEGORY TUNING</div>';
+  for (const cat of Object.keys(confAdj)) {
+    const adj = confAdj[cat];
+    const kelly = kellyMult[cat];
+    const adjColor = adj.startsWith("+") ? "#34d399" : "#f87171";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(cat)}</span><span class="v" style="font-size:10px"><span style="color:${adjColor}">${adj}pts</span> | Kelly ${kelly}</span></div>`;
+  }
+
+  // Category-specific learned weights
+  const cats = data.categories || {};
+  const catCount = data.categoryCount || 0;
+  if (catCount > 0) {
+    html += `<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:10px;margin-bottom:4px">LEARNED WEIGHTS (${catCount} categories)</div>`;
+    for (const [cat, weights] of Object.entries(cats)) {
+      const featureCount = Object.keys(weights).length;
+      const totalValues = Object.values(weights).reduce((s, f) => s + Object.keys(f).length, 0);
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(cat)}</span><span class="v" style="font-size:10px">${featureCount} features, ${totalValues} weights</span></div>`;
+    }
+  } else {
+    html += '<div style="font-size:9px;color:#4b5563;margin-top:10px">Category weights: awaiting sufficient data (20+ settled per category)</div>';
+  }
+
+  // Global model info
+  html += `<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:10px;margin-bottom:4px">GLOBAL MODEL</div>`;
+  html += `<div class="kv"><span class="k" style="font-size:10px">Source</span><span class="v" style="font-size:10px">${esc(data.global?.source || "default")}</span></div>`;
+  html += `<div class="kv"><span class="k" style="font-size:10px">Version</span><span class="v" style="font-size:10px">v${data.global?.modelVersion || 0}</span></div>`;
+
+  el.innerHTML = html;
+}
+
 function renderAuditTimeline(events) {
   const el = $("auditTimelineBlock");
   if (!el) return;
@@ -922,7 +969,10 @@ function handleTradeEvent(msg) {
   if (msg.event === "POSITION_OPENED") {
     const qBadge = msg.quality != null ? `<span style="color:#a78bfa;font-weight:700">Q:${msg.quality}</span> ` : "";
     const rBadge = msg.regime ? `<span style="color:#6b7280">[${msg.regime}]</span> ` : "";
-    detail = `${qBadge}${rBadge}${msg.side} on ${esc((msg.question || msg.marketId || "").slice(0, 40))} | $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}${msg.dryRun ? " [DRY]" : ""}`;
+    const catBadge = msg.category ? `<span style="color:#818cf8;font-size:9px">${esc(msg.category)}</span> ` : "";
+    const mhColor = msg.microHealth >= 65 ? "#34d399" : msg.microHealth >= 40 ? "#fbbf24" : "#f87171";
+    const mhBadge = msg.microHealth != null ? `<span style="color:${mhColor};font-size:9px">MH:${msg.microHealth}</span> ` : "";
+    detail = `${qBadge}${rBadge}${catBadge}${mhBadge}${msg.side} on ${esc((msg.question || msg.marketId || "").slice(0, 40))} | $${(msg.amount || 0).toFixed(2)} @ ${(msg.price || 0).toFixed(3)}${msg.dryRun ? " [DRY]" : ""}`;
   } else if (msg.event === "POSITION_CLOSED") {
     const pnl = msg.pnlUsd || 0;
     detail = `${msg.closeReason} | ${msg.side} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${(msg.pnlPct || 0).toFixed(1)}%) | held ${msg.holdMinutes || 0}m`;

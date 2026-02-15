@@ -208,7 +208,7 @@ export function createMarketPoller(market) {
 
     // Order flow analysis (uses raw orderbooks, not summaries)
     const orderFlowData = snapshot.ok && snapshot.rawBooks
-      ? analyzeMarketOrderFlow(snapshot.rawBooks.yes, snapshot.rawBooks.no, prelimSide)
+      ? analyzeMarketOrderFlow(snapshot.rawBooks.yes, snapshot.rawBooks.no, prelimSide, market.slug || market.id)
       : null;
 
     // Build partial tick for confidence scoring (needs all fields)
@@ -265,7 +265,11 @@ export function createMarketPoller(market) {
         flowConflicts: orderFlowData.flowConflicts,
         totalDepth: orderFlowData.totalDepth,
         bidWallCount: (orderFlowData.yes.bidWalls?.length ?? 0) + (orderFlowData.no.bidWalls?.length ?? 0),
-        askWallCount: (orderFlowData.yes.askWalls?.length ?? 0) + (orderFlowData.no.askWalls?.length ?? 0)
+        askWallCount: (orderFlowData.yes.askWalls?.length ?? 0) + (orderFlowData.no.askWalls?.length ?? 0),
+        spreadMomentum: orderFlowData.spreadMomentum,
+        slopeDivergence: orderFlowData.slopeDivergence,
+        liqConcentration: orderFlowData.liqConcentration,
+        microHealth: orderFlowData.microHealth
       } : null,
       confidence,
       confidenceTier: confidenceResult?.tier ?? null,

@@ -117,6 +117,27 @@ export function analyzeOrderbook(book, opts = {}) {
   else if (pressureScore <= -40) pressureLabel = "STRONG_SELL";
   else if (pressureScore <= -15) pressureLabel = "SELL";
 
+  // ── Microstructure metrics ──
+
+  // Book slope: steepness of bid/ask depth curves
+  // Steep slope = concentrated depth near top of book = strong support/resistance
+  // Shallow slope = depth distributed evenly = weak levels
+  const bidSlope = computeBookSlope(topBids);
+  const askSlope = computeBookSlope(topAsks);
+  // Positive slope divergence (bid steeper than ask) = bullish microstructure
+  const slopeDivergence = bidSlope != null && askSlope != null
+    ? Math.round((bidSlope - askSlope) * 1000) / 1000
+    : null;
+
+  // Liquidity concentration: fraction of total depth in top 3 levels
+  // High concentration (>0.8) = fragile liquidity, easy to push through
+  // Low concentration (<0.5) = distributed depth, harder to move price
+  const top3Bids = parsedBids.slice(0, 3).reduce((s, l) => s + l.size, 0);
+  const top3Asks = parsedAsks.slice(0, 3).reduce((s, l) => s + l.size, 0);
+  const liqConcentration = totalDepth > 0
+    ? Math.round(((top3Bids + top3Asks) / totalDepth) * 1000) / 1000
+    : null;
+
   return {
     bidDepth: Math.round(bidDepth),
     askDepth: Math.round(askDepth),
@@ -128,8 +149,76 @@ export function analyzeOrderbook(book, opts = {}) {
     pressureScore,
     pressureLabel,
     weightedBidPrice,
-    weightedAskPrice
+    weightedAskPrice,
+    bidSlope,
+    askSlope,
+    slopeDivergence,
+    liqConcentration
   };
+}
+
+/**
+ * Compute book slope: how steeply depth is concentrated near top of book.
+ * Returns a score 0-1: 1.0 = all depth at top level, 0 = evenly distributed.
+ * Uses exponential decay weighting: top levels matter more.
+ */
+function computeBookSlope(levels) {
+  if (!levels || levels.length < 2) return null;
+  const totalSize = levels.reduce((s, l) => s + l.size, 0);
+  if (totalSize === 0) return null;
+
+  // Weight each level by 1/(position+1): level 0 = 1.0, level 1 = 0.5, level 2 = 0.33...
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (let i = 0; i < levels.length; i++) {
+    const w = 1 / (i + 1);
+    weightedSum += (levels[i].size / totalSize) * w;
+    weightTotal += w;
+  }
+
+  return Math.round((weightedSum / weightTotal) * 1000) / 1000;
+}
+
+// Spread momentum tracker: rolling history of average spread per market
+const spreadHistory = new Map(); // marketId → [{ timestamp, avgSpread }]
+const SPREAD_HISTORY_MAX = 20;
+
+/**
+ * Track spread and compute momentum (rate of change).
+ * Positive momentum = spread widening (uncertainty rising).
+ * Negative momentum = spread tightening (consensus forming).
+ */
+function trackSpreadMomentum(marketId, avgSpread) {
+  if (avgSpread == null || marketId == null) return null;
+
+  let history = spreadHistory.get(marketId);
+  if (!history) {
+    history = [];
+    spreadHistory.set(marketId, history);
+  }
+
+  history.push({ timestamp: Date.now(), avgSpread });
+  if (history.length > SPREAD_HISTORY_MAX) history.shift();
+
+  if (history.length < 3) return null;
+
+  // Compare current spread to average of last 5 samples
+  const recent = history.slice(-5);
+  const avgRecent = recent.reduce((s, h) => s + h.avgSpread, 0) / recent.length;
+  const older = history.slice(0, -5);
+  if (older.length === 0) return null;
+  const avgOlder = older.reduce((s, h) => s + h.avgSpread, 0) / older.length;
+
+  // Momentum: positive = widening, negative = tightening
+  const momentum = avgOlder > 0 ? (avgRecent - avgOlder) / avgOlder : 0;
+  return Math.round(momentum * 10000) / 10000;
+}
+
+/**
+ * Get spread history for a market (for dashboard).
+ */
+export function getSpreadHistory(marketId) {
+  return spreadHistory.get(marketId) || [];
 }
 
 /**
@@ -138,9 +227,10 @@ export function analyzeOrderbook(book, opts = {}) {
  * @param {object} yesBook - YES token orderbook
  * @param {object} noBook  - NO token orderbook
  * @param {string} signalSide - "UP" or "DOWN" (which side we're considering)
+ * @param {string} marketId - Market identifier for spread momentum tracking
  * @returns {object} Combined order flow analysis
  */
-export function analyzeMarketOrderFlow(yesBook, noBook, signalSide) {
+export function analyzeMarketOrderFlow(yesBook, noBook, signalSide, marketId) {
   const yesFlow = analyzeOrderbook(yesBook);
   const noFlow = analyzeOrderbook(noBook);
 
@@ -169,6 +259,42 @@ export function analyzeMarketOrderFlow(yesBook, noBook, signalSide) {
     : meanSpread < 0.05 ? "NORMAL"
     : "WIDE";
 
+  // Spread momentum tracking
+  const spreadMomentum = trackSpreadMomentum(marketId, meanSpread);
+
+  // Aggregate microstructure from both sides
+  const avgSlopeDivergence = [yesFlow.slopeDivergence, noFlow.slopeDivergence]
+    .filter(v => v != null);
+  const microSlopeDivergence = avgSlopeDivergence.length > 0
+    ? Math.round(avgSlopeDivergence.reduce((a, b) => a + b, 0) / avgSlopeDivergence.length * 1000) / 1000
+    : null;
+
+  const avgLiqConcentration = [yesFlow.liqConcentration, noFlow.liqConcentration]
+    .filter(v => v != null);
+  const microLiqConcentration = avgLiqConcentration.length > 0
+    ? Math.round(avgLiqConcentration.reduce((a, b) => a + b, 0) / avgLiqConcentration.length * 1000) / 1000
+    : null;
+
+  // Microstructure health: 0-100 composite
+  // High slope divergence aligned with signal = good (20pts)
+  // Low liquidity concentration = good (30pts)
+  // Tight/tightening spread = good (30pts)
+  // Good depth = good (20pts)
+  let microHealth = 50; // baseline
+  if (microSlopeDivergence != null) {
+    const slopeBonus = signalSide === "UP" ? microSlopeDivergence : -microSlopeDivergence;
+    microHealth += Math.round(Math.max(-20, Math.min(20, slopeBonus * 100)));
+  }
+  if (microLiqConcentration != null) {
+    // Lower concentration = better (more distributed depth)
+    microHealth += Math.round((1 - microLiqConcentration) * 15 - 7);
+  }
+  if (spreadMomentum != null) {
+    // Negative momentum (tightening) = good
+    microHealth += Math.round(Math.max(-15, Math.min(15, -spreadMomentum * 500)));
+  }
+  microHealth = Math.max(0, Math.min(100, microHealth));
+
   return {
     yes: yesFlow,
     no: noFlow,
@@ -178,6 +304,11 @@ export function analyzeMarketOrderFlow(yesBook, noBook, signalSide) {
     totalDepth: Math.round(totalDepth),
     // Summary: does the order flow support the signal?
     flowSupports: alignedScore > 10,
-    flowConflicts: alignedScore < -10
+    flowConflicts: alignedScore < -10,
+    // Microstructure
+    spreadMomentum,
+    slopeDivergence: microSlopeDivergence,
+    liqConcentration: microLiqConcentration,
+    microHealth
   };
 }

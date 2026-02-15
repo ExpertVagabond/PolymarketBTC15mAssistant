@@ -132,11 +132,37 @@ export function computeSignalKelly(tick) {
     fraction *= confidence / 70;
   }
 
+  // Category adjustment: reduce Kelly for categories where TA is less reliable
+  const category = tick.category || tick.market?.category || null;
+  const categoryMult = getCategoryKellyMult(category);
+  fraction *= categoryMult;
+
   const kelly = computeKelly(modelProb, marketPrice, {
     fraction,
     maxBetPct: 0.05,
     minEdge: 0.02
   });
 
-  return { kelly, sizingTier };
+  return { kelly, sizingTier, categoryMult };
+}
+
+/**
+ * Category-specific Kelly multipliers.
+ * Reduces position sizing for categories where TA signals are less reliable.
+ * Crypto: full Kelly — TA indicators are well-calibrated
+ * Sports/Esports: 0.8x — event-driven, higher variance
+ * Politics: 0.7x — slow-moving, indicators less useful
+ * Weather: 0.6x — fundamental-driven, TA nearly useless
+ */
+const CATEGORY_KELLY_MULT = {
+  crypto: 1.0, Bitcoin: 1.0, Ethereum: 1.0,
+  Sports: 0.8, Esports: 0.8, Tennis: 0.8,
+  Politics: 0.7,
+  Weather: 0.6, Economics: 0.7,
+  "Up or Down": 0.8, "15M": 0.8
+};
+
+function getCategoryKellyMult(category) {
+  if (!category) return 1.0;
+  return CATEGORY_KELLY_MULT[category] ?? 0.9;
 }

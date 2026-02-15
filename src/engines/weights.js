@@ -8,13 +8,14 @@
  * Refreshes automatically every REFRESH_INTERVAL_MS.
  */
 
-import { computeDynamicWeights, getFeatureWinRates, getComboWinRates } from "../signals/history.js";
+import { computeDynamicWeights, computeCategoryWeights, getFeatureWinRates, getComboWinRates } from "../signals/history.js";
 
 const REFRESH_INTERVAL_MS = 10 * 60_000; // Recalculate every 10 minutes
 const MIN_SETTLED = 50; // Minimum settled outcomes before learning kicks in
 
 let cachedWeights = null;
 let cachedCombos = null; // combo (pair) multipliers
+let cachedCategoryWeights = null; // { category: { feature: { value: multiplier } } }
 let lastRefreshMs = 0;
 let refreshTimer = null;
 let modelVersion = 0;
@@ -88,9 +89,13 @@ function refresh() {
 
     // Refresh combo multipliers
     refreshCombos();
+
+    // Refresh per-category weights
+    refreshCategoryWeights();
   } catch {
     cachedWeights = null; // DB error, use defaults
     cachedCombos = null;
+    cachedCategoryWeights = null;
   }
   lastRefreshMs = Date.now();
 }
@@ -120,6 +125,25 @@ function refreshCombos() {
     cachedCombos = Object.keys(map).length > 0 ? map : null;
   } catch {
     cachedCombos = null;
+  }
+}
+
+/**
+ * Refresh per-category weight multipliers from history.
+ * Each category gets its own weight table, falling back to global weights.
+ */
+function refreshCategoryWeights() {
+  try {
+    const raw = computeCategoryWeights(20);
+    if (!raw) { cachedCategoryWeights = null; return; }
+
+    const result = {};
+    for (const [cat, catWeights] of Object.entries(raw)) {
+      result[cat] = toMultipliers(catWeights);
+    }
+    cachedCategoryWeights = Object.keys(result).length > 0 ? result : null;
+  } catch {
+    cachedCategoryWeights = null;
   }
 }
 
@@ -168,6 +192,32 @@ export function getWeight(feature, value) {
 }
 
 /**
+ * Get the scoring weight for a specific indicator feature value, category-aware.
+ * Tries category-specific weight first, falls back to global learned, then defaults.
+ *
+ * @param {string} feature - e.g. "rsi_zone"
+ * @param {string} value - e.g. "OVERBOUGHT"
+ * @param {string|null} category - e.g. "crypto", "Politics"
+ * @returns {number} Multiplier (0.5 - 1.5, default 1.0)
+ */
+export function getCategoryWeight(feature, value, category) {
+  if (Date.now() - lastRefreshMs > REFRESH_INTERVAL_MS) {
+    refresh();
+  }
+
+  // Try category-specific weights first
+  if (category && cachedCategoryWeights) {
+    const catW = cachedCategoryWeights[category];
+    if (catW && catW[feature] && catW[feature][value] != null) {
+      return catW[feature][value];
+    }
+  }
+
+  // Fall back to global weight
+  return getWeight(feature, value);
+}
+
+/**
  * Get the combo (feature-pair) multiplier for a given VWAP+RSI combo.
  *
  * @param {string} vwapPosition - e.g. "ABOVE"
@@ -195,6 +245,8 @@ export function getAllWeights() {
     modelVersion,
     weights: cachedWeights || DEFAULT_WEIGHTS,
     combos: cachedCombos || {},
+    categoryWeights: cachedCategoryWeights || {},
+    categoryCount: cachedCategoryWeights ? Object.keys(cachedCategoryWeights).length : 0,
     lastRefresh: lastRefreshMs,
     nextRefresh: lastRefreshMs + REFRESH_INTERVAL_MS,
     recentChanges: weightHistory.slice(-10)

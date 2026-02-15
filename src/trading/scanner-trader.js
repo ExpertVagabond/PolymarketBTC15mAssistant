@@ -169,7 +169,7 @@ async function processSignal(tick) {
     recordTradeOpen();
     tradeCount++;
     logAuditEvent("POSITION_OPENED", { executionId: execId, marketId, tokenId, side: rec.side, category, amount: betSize, price: entryPrice, dryRun: true, detail: { quality, regime } });
-    broadcastTradeEvent("POSITION_OPENED", { executionId: execId, marketId, question, side: rec.side, strength: rec.strength, amount: betSize, price: entryPrice, dryRun: true, sizing: sizing.method, quality, regime });
+    broadcastTradeEvent("POSITION_OPENED", { executionId: execId, marketId, question, side: rec.side, strength: rec.strength, amount: betSize, price: entryPrice, dryRun: true, sizing: sizing.method, quality, regime, category, microHealth: tick.orderFlow?.microHealth ?? null });
     console.log(`  -> DRY RUN logged (exec #${execId})`);
     return;
   }

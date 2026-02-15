@@ -41,13 +41,18 @@ export function computeSignalQuality(tick, context = {}) {
   const streakMult = context.streakMultiplier ?? 1.0;
   breakdown.streak = Math.min(6, streakMult * 6);
 
-  // 7. Hourly favorability (0-7 points)
+  // 7. Hourly favorability (0-5 points)
   const hourMult = context.hourMultiplier ?? 1.0;
-  breakdown.hourly = Math.min(7, hourMult * 6.36); // 1.1x → 7
+  breakdown.hourly = Math.min(5, hourMult * 4.55); // 1.1x → 5
+
+  // 8. Microstructure health (0-7 points) — rewards healthy orderbook structure
+  const microHealth = tick.orderFlow?.microHealth ?? 50;
+  breakdown.microstructure = Math.min(7, (microHealth / 100) * 7);
 
   const quality = Math.round(
     breakdown.confidence + breakdown.edge + breakdown.correlation +
-    breakdown.regime + breakdown.stability + breakdown.streak + breakdown.hourly
+    breakdown.regime + breakdown.stability + breakdown.streak + breakdown.hourly +
+    breakdown.microstructure
   );
 
   return {

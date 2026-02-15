@@ -183,6 +183,16 @@ export function computeConfidence(tick, opts = {}) {
   }
   maxPossible += 5;
 
+  // ── 10. Category adjustment (-5 to +5 points) ──
+  // TA-friendly categories (crypto) get a boost; event-driven categories get a penalty
+  const category = tick.category || tick.market?.category || null;
+  if (category) {
+    const catAdj = getCategoryConfidenceAdj(category);
+    breakdown.category = catAdj;
+    total += catAdj;
+  }
+  // No maxPossible change — category is an adjustment, not a base factor
+
   // ── Normalize to 0-100 ──
   // Total can be negative from penalties; floor at 0
   const rawScore = Math.max(0, total);
@@ -199,4 +209,25 @@ export function computeConfidence(tick, opts = {}) {
   else tier = "VERY_LOW";
 
   return { score, tier, breakdown, rawPoints: Math.round(total * 10) / 10, maxPoints: maxPossible };
+}
+
+/**
+ * Category-specific confidence adjustments.
+ * TA-friendly categories get a boost, event-driven categories get a penalty.
+ * Crypto: TA indicators (VWAP, RSI, MACD) are well-calibrated → +5
+ * Sports/Esports: event-driven, indicators less predictive → -5
+ * Politics: slow-moving, regime-driven, TA noisy → -5
+ * Weather/Economics: fundamental-driven → -3
+ * Default: 0
+ */
+const CATEGORY_CONFIDENCE_ADJ = {
+  crypto: 5, Bitcoin: 5, Ethereum: 5,
+  Sports: -5, Esports: -5, Tennis: -5,
+  Politics: -5,
+  Weather: -3, Economics: -3,
+  "Up or Down": -3, "15M": -3
+};
+
+function getCategoryConfidenceAdj(category) {
+  return CATEGORY_CONFIDENCE_ADJ[category] ?? 0;
 }

@@ -289,7 +289,8 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/export?days=30&format=json", desc: "Export trade executions with full decision context (quality, regime, streak, sizing). Use format=csv for CSV", tryable: true },
     { method: "GET", path: "/api/trading/calibration", desc: "Confidence calibration: actual vs expected win rate per confidence decile, flags miscalibrated buckets", tryable: true },
     { method: "GET", path: "/api/trading/attribution?days=30", desc: "P&L attribution: performance breakdown by quality tier, regime, category, hour, sizing method, strength", tryable: true },
-    { method: "GET", path: "/api/trading/regime-history", desc: "Regime transition tracker: current regime distribution and per-market transition history with stability", tryable: true }
+    { method: "GET", path: "/api/trading/regime-history", desc: "Regime transition tracker: current regime distribution and per-market transition history with stability", tryable: true },
+    { method: "GET", path: "/api/trading/category-weights", desc: "Per-category learned indicator weights, global model version, combo multipliers, and category tuning parameters", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },

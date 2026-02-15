@@ -825,6 +825,16 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     return { distribution: getRegimeDistribution(), transitions: getRegimeTransitions() };
   });
 
+  app.get("/api/trading/category-weights", async () => {
+    const weights = getAllWeights();
+    return {
+      global: { source: weights.source, modelVersion: weights.modelVersion, weights: weights.weights },
+      categories: weights.categoryWeights,
+      categoryCount: weights.categoryCount,
+      combos: weights.combos
+    };
+  });
+
   app.get("/api/trading/daily-summary", async (req) => {
     const date = req.query.date || undefined;
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "provide ?date=YYYY-MM-DD" };

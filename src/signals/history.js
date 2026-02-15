@@ -67,7 +67,9 @@ function ensureTable() {
     ["bb_width", "REAL"], ["time_decay", "REAL"], ["degenerate", "INTEGER DEFAULT 0"],
     ["confidence", "INTEGER"], ["confidence_tier", "TEXT"],
     ["kelly_bet_pct", "REAL"], ["kelly_sizing_tier", "TEXT"],
-    ["flow_aligned_score", "INTEGER"], ["flow_quality", "TEXT"]
+    ["flow_aligned_score", "INTEGER"], ["flow_quality", "TEXT"],
+    ["spread_momentum", "REAL"], ["slope_divergence", "REAL"],
+    ["liq_concentration", "REAL"], ["micro_health", "INTEGER"]
   ];
   for (const [col, type] of newCols) {
     if (!existingCols.includes(col)) {
@@ -85,7 +87,8 @@ function ensureTable() {
         heiken_color, heiken_count, ob_zone, vol_regime, atr_pct,
         bb_width, time_decay, degenerate,
         confidence, confidence_tier, kelly_bet_pct, kelly_sizing_tier,
-        flow_aligned_score, flow_quality
+        flow_aligned_score, flow_quality,
+        spread_momentum, slope_divergence, liq_concentration, micro_health
       ) VALUES (
         @market_id, @question, @category, @signal, @side, @strength, @phase, @regime,
         @model_up, @model_down, @market_yes, @market_no, @edge, @rsi,
@@ -94,7 +97,8 @@ function ensureTable() {
         @heiken_color, @heiken_count, @ob_zone, @vol_regime, @atr_pct,
         @bb_width, @time_decay, @degenerate,
         @confidence, @confidence_tier, @kelly_bet_pct, @kelly_sizing_tier,
-        @flow_aligned_score, @flow_quality
+        @flow_aligned_score, @flow_quality,
+        @spread_momentum, @slope_divergence, @liq_concentration, @micro_health
       )
     `),
 
@@ -265,7 +269,11 @@ export function logSignal(tick) {
     kelly_bet_pct: tick.kelly?.betPct ?? null,
     kelly_sizing_tier: tick.kelly?.sizingTier ?? null,
     flow_aligned_score: tick.orderFlow?.alignedScore ?? null,
-    flow_quality: tick.orderFlow?.flowQuality ?? null
+    flow_quality: tick.orderFlow?.flowQuality ?? null,
+    spread_momentum: tick.orderFlow?.spreadMomentum ?? null,
+    slope_divergence: tick.orderFlow?.slopeDivergence ?? null,
+    liq_concentration: tick.orderFlow?.liqConcentration ?? null,
+    micro_health: tick.orderFlow?.microHealth ?? null
   });
 }
 
@@ -497,6 +505,70 @@ export function computeDynamicWeights() {
   }
 
   return weights;
+}
+
+/**
+ * Compute dynamic indicator weights segmented by category.
+ * Returns: { category: { featureName: { featureValue: weight } } }
+ * Only includes categories with >= minSettled settled outcomes.
+ * Falls back to null for categories with insufficient data.
+ */
+export function computeCategoryWeights(minSettled = 20) {
+  if (!stmts) ensureTable();
+  const db = getDb();
+
+  // Get categories with enough data
+  const categories = db.prepare(`
+    SELECT category, COUNT(*) as settled
+    FROM signal_history
+    WHERE signal != 'NO TRADE' AND outcome IS NOT NULL AND category IS NOT NULL
+    GROUP BY category
+    HAVING settled >= ?
+  `).all(minSettled);
+
+  if (categories.length === 0) return null;
+
+  const features = [
+    "vwap_position", "vwap_slope_dir", "rsi_zone", "macd_state",
+    "heiken_color", "ob_zone", "vol_regime", "regime"
+  ];
+
+  const result = {};
+  for (const { category } of categories) {
+    const catWeights = {};
+    for (const feat of features) {
+      const rows = db.prepare(`
+        SELECT
+          ${feat} as val,
+          COUNT(*) as total,
+          SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
+          SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) as losses
+        FROM signal_history
+        WHERE signal != 'NO TRADE'
+          AND outcome IS NOT NULL
+          AND ${feat} IS NOT NULL
+          AND category = ?
+        GROUP BY ${feat}
+        HAVING total >= 3
+      `).all(category);
+
+      if (rows.length > 0) {
+        catWeights[feat] = {};
+        for (const row of rows) {
+          const settled = row.wins + row.losses;
+          if (settled === 0) continue;
+          const winRate = row.wins / settled;
+          const confidenceFactor = Math.min(1, row.total / 30);
+          catWeights[feat][row.val] = (winRate - 0.5) * 2 * confidenceFactor;
+        }
+      }
+    }
+    if (Object.keys(catWeights).length > 0) {
+      result[category] = catWeights;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 /**
