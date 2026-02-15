@@ -7,6 +7,11 @@ import { ensurePollerRunning, getCurrentState, getRecentHistory, getBacktestSumm
 import { getRecentSignals, getSignalStats, getTimeSeries, getCalibration, getDrawdownStats, getPerformanceSummary, simulateStrategy } from "../signals/history.js";
 import { getOpenPositions, getPortfolioSummary } from "../portfolio/tracker.js";
 import { getAllWeights, getLearningStatus } from "../engines/weights.js";
+import { queryLogs, getErrorTrends } from "../logging/structured-logger.js";
+import { getFreshness, checkStaleness } from "../net/data-freshness.js";
+import { predictOpenPositions } from "../signals/settlement-predictor.js";
+import { getEdgeAudit } from "../signals/edge-audit.js";
+import { getDriftStatus } from "../engines/model-drift-detector.js";
 
 export function registerTools(server) {
 
@@ -119,6 +124,75 @@ export function registerTools(server) {
     async () => {
       const status = getLearningStatus();
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+    }
+  );
+
+  /* ── Observability tools ── */
+
+  server.tool(
+    "get_error_logs",
+    "Query structured error logs. Filter by source, level, category. Returns recent errors and trends.",
+    { days: { type: "number", description: "Lookback period in days (default 7)" } },
+    async ({ days }) => {
+      const d = Math.min(Math.max(Number(days) || 7, 1), 90);
+      const logs = queryLogs({ days: d, limit: 20 });
+      const trends = getErrorTrends(d);
+      return { content: [{ type: "text", text: JSON.stringify({ logs, trends }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_data_freshness",
+    "Check data source freshness. Shows how recently each source updated and flags stale sources.",
+    {},
+    async () => {
+      const freshness = getFreshness();
+      const staleness = checkStaleness();
+      return { content: [{ type: "text", text: JSON.stringify({ freshness, staleness }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_portfolio_predictions",
+    "Get settlement outcome predictions for all open portfolio positions. Shows win probability, risk level, and suggested action.",
+    {},
+    async () => {
+      const predictions = predictOpenPositions();
+      if (predictions.length === 0) {
+        return { content: [{ type: "text", text: "No open positions to predict." }] };
+      }
+      const compact = predictions.map(p => ({
+        market: p.question?.slice(0, 60),
+        side: p.side,
+        entryPrice: p.entryPrice,
+        currentPrice: p.currentPrice,
+        winProb: p.winProbabilityPct + "%",
+        unrealizedPnl: p.unrealizedPnlPct + "%",
+        risk: p.risk,
+        suggestion: p.suggestion
+      }));
+      return { content: [{ type: "text", text: JSON.stringify(compact, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_edge_audit",
+    "Run edge calibration audit. Compares predicted edge vs actual win rate to find systematic biases.",
+    { days: { type: "number", description: "Lookback period in days (default 30)" } },
+    async ({ days }) => {
+      const d = Math.min(Math.max(Number(days) || 30, 1), 180);
+      const audit = getEdgeAudit(d);
+      return { content: [{ type: "text", text: JSON.stringify(audit, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_drift_status",
+    "Check model weight drift. Compares current weights against a baseline to detect significant divergence.",
+    {},
+    async () => {
+      const drift = getDriftStatus();
+      return { content: [{ type: "text", text: JSON.stringify(drift, null, 2) }] };
     }
   );
 

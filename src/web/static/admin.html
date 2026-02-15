@@ -45,6 +45,9 @@
     .auth-wall h2 { color: #fff; margin-bottom: 8px; }
     .auth-wall p { color: #6b7280; font-size: 13px; }
 
+    .try-btn { background: #1a1a24; border: 1px solid #2a2a36; border-radius: 6px; padding: 3px 10px; font-size: 10px; color: #93c5fd; cursor: pointer; font-family: inherit; font-weight: 600; transition: all 0.15s; }
+    .try-btn:hover { border-color: #3b82f6; background: #3b82f618; }
+
     .footer { text-align: center; padding: 28px; color: #27272f; font-size: 11px; }
     .footer a { color: #4b5563; }
 
@@ -123,6 +126,19 @@
       </div>
     </div>
 
+    <!-- Model Drift -->
+    <div class="card half">
+      <div class="card-title">Model Drift</div>
+      <div id="driftBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+      <div style="margin-top:10px"><button class="try-btn" onclick="resetDriftBaseline()">Reset Baseline</button></div>
+    </div>
+
+    <!-- Webhook Queue -->
+    <div class="card">
+      <div class="card-title">Webhook Queue</div>
+      <div id="webhookQueueBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Error Trends -->
     <div class="card wide">
       <div class="card-title">Error Trends (7d)</div>
@@ -143,15 +159,19 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends] = await Promise.all([
+    const [health, admin, trends, drift, whQueue] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
-      fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null)
+      fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
+      fetch("/api/learning/drift-status").then(r => r.json()).catch(() => null),
+      fetch("/api/admin/webhook-queue").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
     if (admin) renderAdmin(admin);
     if (trends) renderErrors(trends);
+    if (drift) renderDrift(drift);
+    if (whQueue) renderWebhookQueue(whQueue);
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch {
@@ -237,6 +257,43 @@ function renderErrors(t) {
     <div><div style="font-size:10px;color:#6b7280;margin-bottom:6px;font-weight:700">BY SOURCE</div>${sources || '<div style="color:#4b5563;font-size:11px">None</div>'}</div>
     <div><div style="font-size:10px;color:#6b7280;margin-bottom:6px;font-weight:700">BY LEVEL</div>${levels || '<div style="color:#4b5563;font-size:11px">None</div>'}</div>
   </div>`;
+}
+
+function renderDrift(d) {
+  const el = $("driftBlock");
+  if (!d.baselineSet) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No baseline set yet</div>'; return; }
+  const sevColor = d.severity === "none" ? "#34d399" : d.severity === "low" ? "#60a5fa" : d.severity === "medium" ? "#fbbf24" : "#f87171";
+  let html = `<div class="kv"><span class="k">Severity</span><span class="v" style="color:${sevColor}">${(d.severity || "none").toUpperCase()}</span></div>
+    <div class="kv"><span class="k">Checked</span><span class="v">${d.totalChecked ?? 0}</span></div>
+    <div class="kv"><span class="k">Drifted</span><span class="v ${d.totalDrifted > 0 ? "red" : ""}">${d.totalDrifted ?? 0}</span></div>
+    <div class="kv"><span class="k">Threshold</span><span class="v">${d.driftThreshold ? (d.driftThreshold * 100) + "%" : "20%"}</span></div>`;
+  if (d.topDrifts?.length > 0) {
+    html += '<div style="font-size:10px;color:#6b7280;font-weight:700;margin-top:8px;margin-bottom:4px">TOP DRIFTS</div>';
+    html += d.topDrifts.slice(0, 5).map(dr =>
+      `<div class="kv"><span class="k" style="font-size:11px">${esc(dr.feature)}.${esc(dr.value)}</span><span class="v red">${dr.divergencePct}% ${dr.direction}</span></div>`
+    ).join("");
+  }
+  if (d.recommendation) html += `<div style="font-size:11px;color:#9ca3af;margin-top:8px">${esc(d.recommendation)}</div>`;
+  el.innerHTML = html;
+}
+
+function renderWebhookQueue(q) {
+  const el = $("webhookQueueBlock");
+  const s = q.status || {};
+  let html = `<div class="kv"><span class="k">Pending</span><span class="v amber">${s.pending ?? 0}</span></div>
+    <div class="kv"><span class="k">Retrying</span><span class="v amber">${s.retrying ?? 0}</span></div>
+    <div class="kv"><span class="k">Delivered</span><span class="v green">${s.delivered ?? 0}</span></div>
+    <div class="kv"><span class="k">Failed</span><span class="v red">${s.failed ?? 0}</span></div>
+    <div class="kv"><span class="k">Total</span><span class="v">${s.total ?? 0}</span></div>`;
+  el.innerHTML = html;
+}
+
+async function resetDriftBaseline() {
+  try {
+    const res = await fetch("/api/learning/drift-baseline", { method: "POST" });
+    const data = await res.json();
+    if (data.acknowledged) { loadAdmin(); }
+  } catch {}
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

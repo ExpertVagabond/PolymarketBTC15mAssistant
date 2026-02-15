@@ -110,6 +110,12 @@
   <div class="section-title">Authenticated — Email Alerts</div>
   <div id="emailEndpoints"></div>
 
+  <div class="section-title">Signal Intelligence</div>
+  <div id="intelligenceEndpoints"></div>
+
+  <div class="section-title">Admin — Webhook Queue</div>
+  <div id="webhookQueueEndpoints"></div>
+
   <div class="section-title">Observability — Error Logs</div>
   <div id="logsEndpoints"></div>
 
@@ -190,6 +196,17 @@ const ENDPOINTS = {
     { method: "POST", path: "/api/email-prefs", desc: "Update prefs. Body: { alertsEnabled, minConfidence, categories, maxAlertsPerHour }" },
     { method: "GET", path: "/api/throttle-status", desc: "Per-user notification throttle status (count, queued)" },
     { method: "POST", path: "/api/digest/flush", desc: "Flush queued (throttled) signals for digest" }
+  ],
+  intelligenceEndpoints: [
+    { method: "GET", path: "/api/analytics/edge-audit?days=30", desc: "Edge calibration audit: predicted edge vs actual win rate, bias detection", tryable: true },
+    { method: "GET", path: "/api/portfolio/predictions", desc: "Settlement predictions for open positions: win probability, risk, suggestion", tryable: true },
+    { method: "GET", path: "/api/learning/drift-status", desc: "Model weight drift detection vs baseline snapshot", tryable: true },
+    { method: "POST", path: "/api/learning/drift-baseline", desc: "Reset drift baseline to current weights" }
+  ],
+  webhookQueueEndpoints: [
+    { method: "GET", path: "/api/admin/webhook-queue", desc: "Webhook delivery queue status and recent entries", tryable: true },
+    { method: "POST", path: "/api/admin/webhook-queue/replay/:id", desc: "Replay a failed webhook delivery" },
+    { method: "POST", path: "/api/admin/webhook-queue/purge?days=7", desc: "Purge old delivered/failed queue entries" }
   ],
   logsEndpoints: [
     { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },

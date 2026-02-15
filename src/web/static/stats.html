@@ -137,6 +137,10 @@
     <div style="overflow-x:auto"><table id="regimeMatrix"><tbody></tbody></table></div>
   </div>
   <div class="card wide">
+    <div class="card-title">Edge Calibration Audit</div>
+    <div id="edgeAuditBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+  </div>
+  <div class="card wide">
     <div class="card-title">Recent Settled Signals</div>
     <div style="overflow-x:auto">
       <table>
@@ -160,9 +164,10 @@ let charts = {};
 async function loadStats(days = 30) {
   document.querySelectorAll(".period-btn").forEach(b => b.classList.toggle("active", b.textContent.trim() === days + " Days"));
   try {
-    const [data, regime] = await Promise.all([
+    const [data, regime, edgeAudit] = await Promise.all([
       fetch("/api/public-stats?days=" + days).then(r => r.json()),
-      fetch("/api/analytics/regime?days=" + days).then(r => r.json()).catch(() => null)
+      fetch("/api/analytics/regime?days=" + days).then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/edge-audit?days=" + days).then(r => r.json()).catch(() => null)
     ]);
     renderKPIs(data, days);
     renderEquity(data);
@@ -172,6 +177,7 @@ async function loadStats(days = 30) {
     renderStrengths(data);
     renderSettled(data);
     if (regime) { renderRegime(regime); renderRegimeMatrix(regime); }
+    if (edgeAudit) renderEdgeAudit(edgeAudit);
   } catch (err) {
     console.error("Failed to load stats:", err);
   }
@@ -345,6 +351,28 @@ function renderRegimeMatrix(r) {
     html += '</tr>';
   }
   tbody.innerHTML = html;
+}
+
+function renderEdgeAudit(a) {
+  const el = $("edgeAuditBlock");
+  if (!a.totalAudited || a.totalAudited === 0) { el.innerHTML = '<div style="color:#4b5563;font-size:12px">No settled signals with edge data yet</div>'; return; }
+  const o = a.overall;
+  const biasColor = o.biasDirection === "well-calibrated" ? C.green : o.biasDirection === "overconfident" ? C.red : C.amber;
+  let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:14px">
+    <div style="text-align:center"><div style="font-size:10px;color:#4b5563">AUDITED</div><div style="font-size:18px;font-weight:700;color:#e5e7eb">${a.totalAudited}</div></div>
+    <div style="text-align:center"><div style="font-size:10px;color:#4b5563">WIN RATE</div><div style="font-size:18px;font-weight:700;color:${o.actualWinRate >= 50 ? C.green : C.red}">${o.actualWinRate}%</div></div>
+    <div style="text-align:center"><div style="font-size:10px;color:#4b5563">AVG EDGE</div><div style="font-size:18px;font-weight:700;color:${C.blue}">+${o.avgPredictedEdge}%</div></div>
+    <div style="text-align:center"><div style="font-size:10px;color:#4b5563">BIAS</div><div style="font-size:18px;font-weight:700;color:${biasColor}">${o.calibrationBias > 0 ? "+" : ""}${o.calibrationBias}%</div><div style="font-size:9px;color:#4b5563">${o.biasDirection}</div></div>
+  </div>`;
+  if (a.edgeBuckets?.length) {
+    html += '<div style="font-size:10px;color:#6b7280;font-weight:700;margin-bottom:6px">EDGE BUCKETS</div>';
+    html += a.edgeBuckets.filter(b => b.total > 0).map(b => {
+      const wr = b.winRate != null ? b.winRate + "%" : "-";
+      const color = (b.winRate ?? 0) >= 55 ? C.green : (b.winRate ?? 0) >= 45 ? C.amber : C.red;
+      return `<div class="cat-row"><span class="cat-name">${esc(b.range)}</span><div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${b.winRate || 0}%;background:${color}"></div></div><span class="cat-stats">${wr} (${b.total})</span></div>`;
+    }).join("");
+  }
+  el.innerHTML = html;
 }
 
 function esc(s) { if (!s) return ""; const el = document.createElement("span"); el.textContent = s; return el.innerHTML; }

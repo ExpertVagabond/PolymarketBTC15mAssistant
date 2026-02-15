@@ -29,6 +29,10 @@ import { generateKey, verifyKey, listKeys, revokeKey } from "../subscribers/api-
 import { addWebhook, listWebhooks, deleteWebhook, setEmailPrefs, getEmailPrefs, getThrottleStatus, flushDigestQueue } from "../notifications/dispatch.js";
 import { queryLogs, getErrorTrends } from "../logging/structured-logger.js";
 import { saveStrategy, listStrategies, getStrategy, deleteStrategy, backtestStrategy, compareStrategies } from "../strategies/library.js";
+import { getEdgeAudit } from "../signals/edge-audit.js";
+import { predictOpenPositions } from "../signals/settlement-predictor.js";
+import { getDriftStatus, setBaseline, acknowledgeBaseline } from "../engines/model-drift-detector.js";
+import { getQueueStatus, getRecentQueue, replayDelivery, startQueueProcessor, purgeQueue } from "../notifications/webhook-queue.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -511,6 +515,46 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     return getErrorTrends(Number(req.query.days) || 7);
   });
 
+  /* ── Edge Audit API ── */
+
+  app.get("/api/analytics/edge-audit", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getEdgeAudit(days);
+  });
+
+  /* ── Settlement Predictions API ── */
+
+  app.get("/api/portfolio/predictions", async () => {
+    return predictOpenPositions();
+  });
+
+  /* ── Model Drift API ── */
+
+  app.get("/api/learning/drift-status", async () => {
+    return getDriftStatus();
+  });
+
+  app.post("/api/learning/drift-baseline", async () => {
+    return acknowledgeBaseline();
+  });
+
+  /* ── Webhook Queue API ── */
+
+  app.get("/api/admin/webhook-queue", async () => {
+    return { status: getQueueStatus(), recent: getRecentQueue(20) };
+  });
+
+  app.post("/api/admin/webhook-queue/replay/:id", async (req) => {
+    const ok = replayDelivery(Number(req.params.id));
+    return { replayed: ok };
+  });
+
+  app.post("/api/admin/webhook-queue/purge", async (req) => {
+    const days = Math.max(Number(req.query.days) || 7, 1);
+    const result = purgeQueue(days);
+    return { purged: result.changes };
+  });
+
   /* ── API Key Auth (X-API-Key header) ── */
 
   function requireApiKeyOrSession(req, reply, done) {
@@ -658,6 +702,9 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
       done(err);
     }
   });
+
+  // Start webhook delivery queue processor
+  startQueueProcessor();
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`Web dashboard: http://localhost:${PORT}`);

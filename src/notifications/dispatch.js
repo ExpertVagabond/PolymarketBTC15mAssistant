@@ -12,6 +12,7 @@
  */
 
 import { getDb } from "../subscribers/db.js";
+import { enqueueWebhook } from "./webhook-queue.js";
 
 let stmts = null;
 
@@ -171,7 +172,8 @@ export async function dispatchWebhooks(tick) {
   const payload = formatSignalPayload(tick);
 
   for (const wh of webhooks) {
-    sendWebhook(wh, payload).catch(() => {});
+    // Enqueue for durable delivery with retry instead of fire-and-forget
+    enqueueWebhook(wh.id, wh.url, payload);
   }
 }
 

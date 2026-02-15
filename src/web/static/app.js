@@ -1013,14 +1013,15 @@ function renderVolumeChart(ts) {
 
 async function loadPortfolio() {
   try {
-    const [summary, positions, recent] = await Promise.all([
+    const [summary, positions, recent, predictions] = await Promise.all([
       fetch("/api/portfolio/summary").then(r => r.json()),
       fetch("/api/portfolio/positions").then(r => r.json()),
-      fetch("/api/portfolio/recent?limit=30").then(r => r.json())
+      fetch("/api/portfolio/recent?limit=30").then(r => r.json()),
+      fetch("/api/portfolio/predictions").then(r => r.json()).catch(() => [])
     ]);
 
     renderPortfolioKPIs(summary);
-    renderOpenPositions(positions);
+    renderOpenPositions(positions, predictions);
     renderRecentTrades(recent);
     portfolioLoaded = true;
   } catch (err) {
@@ -1044,13 +1045,23 @@ function renderPortfolioKPIs(s) {
   $("pfBest").textContent = s.best_trade != null ? "+" + s.best_trade.toFixed(1) + "%" : "-";
 }
 
-function renderOpenPositions(positions) {
+function renderOpenPositions(positions, predictions) {
+  // Build prediction lookup by position ID
+  const predMap = {};
+  if (Array.isArray(predictions)) {
+    for (const pred of predictions) predMap[pred.positionId] = pred;
+  }
+
   $("openPositionsBody").innerHTML = positions.length === 0
-    ? '<tr><td colspan="8" style="text-align:center;color:#4b5563;padding:20px">No open positions. Signals will auto-open virtual positions.</td></tr>'
+    ? '<tr><td colspan="10" style="text-align:center;color:#4b5563;padding:20px">No open positions. Signals will auto-open virtual positions.</td></tr>'
     : positions.map(p => {
       const side = p.side === "UP" ? "YES" : "NO";
       const pnlColor = p.unrealizedPnl >= 0 ? "#34d399" : "#f87171";
       const opened = p.opened_at ? new Date(p.opened_at).toLocaleTimeString() : "-";
+      const pred = predMap[p.id];
+      const winPct = pred ? pred.winProbabilityPct + "%" : "-";
+      const winColor = pred ? (pred.winProbability >= 0.7 ? "#34d399" : pred.winProbability >= 0.45 ? "#fbbf24" : "#f87171") : "#4b5563";
+      const riskBadge = pred ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:${pred.risk==="LOW"?"#34d39918":"#f8717118"};color:${pred.risk==="LOW"?"#34d399":pred.risk==="HIGH"?"#f87171":"#fbbf24"}">${pred.risk}</span>` : "-";
       return `<tr>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.question)}">${esc(truncQ(p.question, 45))}</td>
         <td><span class="sig-cell ${p.side === 'UP' ? 'active' : ''}">${side}</span></td>
@@ -1059,6 +1070,8 @@ function renderOpenPositions(positions) {
         <td style="color:#fbbf24">${(p.bet_pct * 100).toFixed(2)}%</td>
         <td>${p.confidence ?? "-"}</td>
         <td style="color:${pnlColor};font-weight:600">${p.unrealizedPnl >= 0 ? "+" : ""}${p.unrealizedPnl.toFixed(2)}%</td>
+        <td style="color:${winColor};font-weight:600">${winPct}</td>
+        <td>${riskBadge}</td>
         <td style="color:#4b5563">${opened}</td>
       </tr>`;
     }).join("");
