@@ -595,7 +595,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData, driftMonData, costOptData, arbiterData, recoveryPredData, latencyData, bayesianData, exitOptData, basisData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData, driftMonData, costOptData, arbiterData, recoveryPredData, latencyData, bayesianData, exitOptData, basisData, regimeMemData, orderRouterData, mmDetectorData, confCalibData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -667,7 +667,11 @@ async function loadAdmin() {
       fetch("/api/engines/latency").then(r => r.json()).catch(() => null),
       fetch("/api/engines/bayesian").then(r => r.json()).catch(() => null),
       fetch("/api/trading/exit-optimizer").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/basis").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/basis").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/regime-memory").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/order-routing").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/mm-detector").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/confidence-calibrator").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -740,6 +744,10 @@ async function loadAdmin() {
     if (bayesianData) renderBayesian(bayesianData);
     if (exitOptData) renderExitOpt(exitOptData);
     if (basisData) renderBasis(basisData);
+    if (regimeMemData) renderRegimeMemory(regimeMemData);
+    if (orderRouterData) renderOrderRouter(orderRouterData);
+    if (mmDetectorData) renderMMDetector(mmDetectorData);
+    if (confCalibData) renderConfCalib(confCalibData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2608,6 +2616,61 @@ function renderBasis(data) {
   html += `<div class="kv"><span class="k">Revert Signals</span><span class="v">${data.strongRevertSignals || 0} strong</span></div>`;
   html += `<div class="kv"><span class="k">Best Category</span><span class="v" style="color:#22c55e">${esc(data.bestCategory || 'unknown')}</span></div>`;
   html += `<div class="kv"><span class="k">Worst Category</span><span class="v" style="color:#ef4444">${esc(data.worstCategory || 'unknown')}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderRegimeMemory(data) {
+  const el = $("regimeMemBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Best Regime</span><span class="v" style="color:#22c55e">${esc(data.bestRegime || 'unknown')} ($${data.bestRegimePnl || 0})</span></div>`;
+  html += `<div class="kv"><span class="k">Worst Regime</span><span class="v" style="color:#ef4444">${esc(data.worstRegime || 'unknown')} ($${data.worstRegimePnl || 0})</span></div>`;
+  html += `<div class="kv"><span class="k">Regimes Tracked</span><span class="v">${data.regimeCount || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">In-Memory</span><span class="v">${data.inMemorySize || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Total Trades</span><span class="v">${data.totalTrades || 0}</span></div>`;
+  if (data.crossRegimeInsights?.length) {
+    for (const i of data.crossRegimeInsights.slice(0, 2)) {
+      html += `<div style="font-size:9px;color:#4b5563;margin-top:2px">${esc(i.message)}</div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderOrderRouter(data) {
+  const el = $("orderRouterBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Recommended</span><span class="v">${esc(data.recommendedName || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Expected Cost</span><span class="v">${data.expectedCostBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k">Venues</span><span class="v">${data.venueCount || 0} known, ${data.trackedVenues || 0} tracked</span></div>`;
+  html += `<div class="kv"><span class="k">Top Method</span><span class="v">${esc(data.topMethod || 'unknown')} ($${data.topMethodPnl || 0})</span></div>`;
+  html += `<div class="kv"><span class="k">Total Trades</span><span class="v">${data.totalTrades || 0}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderMMDetector(data) {
+  const el = $("mmDetectorBlock");
+  if (!el || !data) return;
+  const riskColor = data.toxicFlowRisk === 'high' ? '#ef4444' : data.toxicFlowRisk === 'moderate' ? '#f59e0b' : '#22c55e';
+  let html = `<div class="kv"><span class="k">MM Presence</span><span class="v">${data.avgMMPresenceScore || 0}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Toxic Flow</span><span class="v" style="color:${riskColor}">${esc(data.toxicFlowRisk || 'unknown')} (${data.toxicFlowCount || 0})</span></div>`;
+  html += `<div class="kv"><span class="k">Markets Analyzed</span><span class="v">${data.marketsAnalyzed || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Spread Markets</span><span class="v">${data.spreadMarkets || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg Spread</span><span class="v">${data.avgSpread || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Tightest</span><span class="v">${esc(data.tightestMarket || 'unknown')}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderConfCalib(data) {
+  const el = $("confCalibBlock");
+  if (!el || !data) return;
+  const calColor = data.overallCalibration === 'overconfident' ? '#ef4444' : data.overallCalibration === 'underconfident' ? '#f59e0b' : '#22c55e';
+  let html = `<div class="kv"><span class="k">Brier Score</span><span class="v">${data.brierScore || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Calibration</span><span class="v" style="color:${calColor}">${esc(data.overallCalibration || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Overconfident</span><span class="v">${data.overconfidentBuckets || 0} buckets</span></div>`;
+  html += `<div class="kv"><span class="k">Underconfident</span><span class="v">${data.underconfidentBuckets || 0} buckets</span></div>`;
+  html += `<div class="kv"><span class="k">Avg Gap</span><span class="v">${data.avgCalibrationGap || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Sample</span><span class="v">${esc(data.sampleAdjustment || 'N/A')}</span></div>`;
+  html += `<div class="kv"><span class="k">Best Regime</span><span class="v" style="color:#22c55e">${esc(data.bestRegime || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Worst Regime</span><span class="v" style="color:#ef4444">${esc(data.worstRegime || 'unknown')}</span></div>`;
   el.innerHTML = html;
 }
 

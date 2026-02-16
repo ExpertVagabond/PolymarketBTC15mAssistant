@@ -105,6 +105,10 @@ import { getLatencyDashboard, analyzeExecutionLatency, predictFillTime } from ".
 import { getPosteriorOverview, calibrateFromHistory as calibratePosteriors, getCredibleInterval } from "../engines/bayesian-posterior.js";
 import { getExitDashboard, analyzeExitTiming, getOptimalExitParams } from "../trading/exit-optimizer.js";
 import { getBasisDashboard, getBasisOverview, getBasisRevertSignals } from "../trading/basis-tracker.js";
+import { getRegimeMemoryDashboard, getRegimeMemory, getRegimeTransitionHistory } from "../engines/regime-memory.js";
+import { getRoutingDashboard, routeOrder, analyzeRoutingPerformance } from "../engines/smart-order-router.js";
+import { getMMDetectorDashboard, detectMMBehavior, analyzeSpreadPatterns } from "../engines/market-maker-detector.js";
+import { getCalibratorDashboard, computeCalibrationCurve, getCategoryCalibration, getRegimeCalibration } from "../engines/confidence-calibrator.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1382,6 +1386,71 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/portfolio/regime-transitions", async (req) => {
     const days = Math.min(Number(req.query.days) || 14, 90);
     return detectRegimeTransitionSpeed(days);
+  });
+
+  /* ── Tier 41: Adaptive Learning & Market Microintelligence ── */
+
+  app.get("/api/engines/regime-memory", async () => {
+    return getRegimeMemoryDashboard();
+  });
+
+  app.get("/api/engines/regime-memory/detailed", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getRegimeMemory(days);
+  });
+
+  app.get("/api/engines/regime-memory/transitions", async (req) => {
+    const regime = req.query.regime || "RANGE";
+    const days = Math.min(Number(req.query.days) || 60, 180);
+    return getRegimeTransitionHistory(regime, days);
+  });
+
+  app.get("/api/engines/order-routing", async () => {
+    return getRoutingDashboard();
+  });
+
+  app.get("/api/engines/order-routing/route", async (req) => {
+    const shares = Number(req.query.shares) || 10;
+    const urgency = req.query.urgency || "medium";
+    const regime = req.query.regime || "RANGE";
+    return routeOrder({ shares, urgency, regime });
+  });
+
+  app.get("/api/engines/order-routing/performance", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return analyzeRoutingPerformance(days);
+  });
+
+  app.get("/api/engines/mm-detector", async () => {
+    return getMMDetectorDashboard();
+  });
+
+  app.get("/api/engines/mm-detector/behavior", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return detectMMBehavior(days);
+  });
+
+  app.get("/api/engines/mm-detector/spreads", async () => {
+    return analyzeSpreadPatterns();
+  });
+
+  app.get("/api/engines/confidence-calibrator", async () => {
+    return getCalibratorDashboard();
+  });
+
+  app.get("/api/engines/confidence-calibrator/curve", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return computeCalibrationCurve(days);
+  });
+
+  app.get("/api/engines/confidence-calibrator/category", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getCategoryCalibration(days);
+  });
+
+  app.get("/api/engines/confidence-calibrator/regime", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getRegimeCalibration(days);
   });
 
   /* ── Tier 40: Latency Analytics & Bayesian Intelligence ── */

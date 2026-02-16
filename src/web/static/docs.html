@@ -275,6 +275,18 @@
   <div class="section-title">Recovery Predictor</div>
   <div id="recoveryPredEndpoints"></div>
 
+  <div class="section-title">Regime Memory</div>
+  <div id="regimeMemEndpoints"></div>
+
+  <div class="section-title">Smart Order Router</div>
+  <div id="orderRouterEndpoints"></div>
+
+  <div class="section-title">MM Detector</div>
+  <div id="mmDetectorEndpoints"></div>
+
+  <div class="section-title">Confidence Calibrator</div>
+  <div id="confCalibEndpoints"></div>
+
   <div class="section-title">Execution Latency</div>
   <div id="latencyEndpoints"></div>
 
@@ -644,6 +656,27 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/portfolio/recovery", desc: "Recovery dashboard: status (recovering/deepening), drawdown amount, days to breakeven, regime stability, resume-trading signal with conditions", tryable: true },
     { method: "GET", path: "/api/portfolio/recovery/time?days=30", desc: "Recovery time estimate: optimistic/base/pessimistic paths, daily P&L rate, confidence, high water mark distance", tryable: true },
     { method: "GET", path: "/api/portfolio/regime-transitions?days=14", desc: "Regime transition speed: transition count and frequency, avg gap between shifts, sharpness score, reversal risk level", tryable: true }
+  ],
+  regimeMemEndpoints: [
+    { method: "GET", path: "/api/engines/regime-memory", desc: "Regime memory dashboard: best/worst regime by P&L, cross-regime insights, confidence effectiveness per regime", tryable: true },
+    { method: "GET", path: "/api/engines/regime-memory/detailed?days=30", desc: "Detailed regime memory: per-regime win rate, avg P&L, high/low confidence WR, best category/method per regime", tryable: true },
+    { method: "GET", path: "/api/engines/regime-memory/transitions?regime=RANGE&days=60", desc: "Regime transition history: what happened last N times we entered this regime, avg P&L per entry, recommendation", tryable: true }
+  ],
+  orderRouterEndpoints: [
+    { method: "GET", path: "/api/engines/order-routing", desc: "Routing dashboard: recommended venue, expected cost, top method by P&L, optimal method by regime", tryable: true },
+    { method: "GET", path: "/api/engines/order-routing/route?shares=20&urgency=medium&regime=RANGE", desc: "Route order: venue recommendation with score, cost/speed tradeoffs, alternatives, rationale", tryable: true },
+    { method: "GET", path: "/api/engines/order-routing/performance?days=30", desc: "Routing performance: venue P&L comparison, win rates by method, optimal method per regime", tryable: true }
+  ],
+  mmDetectorEndpoints: [
+    { method: "GET", path: "/api/engines/mm-detector", desc: "MM detector dashboard: avg MM presence score, toxic flow risk level, spread statistics, market count", tryable: true },
+    { method: "GET", path: "/api/engines/mm-detector/behavior?days=14", desc: "MM behavior analysis: per-market MM presence score, adverse selection detection, hour concentration, quality consistency", tryable: true },
+    { method: "GET", path: "/api/engines/mm-detector/spreads", desc: "Spread patterns: in-memory spread observations, tightest/widest markets, spread trend (widening/tightening/stable)", tryable: true }
+  ],
+  confCalibEndpoints: [
+    { method: "GET", path: "/api/engines/confidence-calibrator", desc: "Calibrator dashboard: Brier score, overall calibration direction, bucket counts, sample adjustment, best/worst regime", tryable: true },
+    { method: "GET", path: "/api/engines/confidence-calibrator/curve?days=30", desc: "Calibration curve: per-bucket predicted vs actual win rate, Brier decomposition, adjustment factors", tryable: true },
+    { method: "GET", path: "/api/engines/confidence-calibrator/category?days=30", desc: "Category calibration: per-category confidence gap, adjustment factor, best/worst calibrated category", tryable: true },
+    { method: "GET", path: "/api/engines/confidence-calibrator/regime?days=30", desc: "Regime calibration: per-regime confidence gap, adjustment factor, calibration quality", tryable: true }
   ],
   latencyEndpoints: [
     { method: "GET", path: "/api/engines/latency", desc: "Latency dashboard: P50/P95/P99 percentiles, bottleneck count, regime-level timing, recommendations", tryable: true },
