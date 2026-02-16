@@ -47,6 +47,10 @@ import { getHealthScore, getHealthHistory, getHealthTrend, checkHealthAlerts } f
 import { getRecoveryLog } from "../maintenance/auto-recovery.js";
 import { getEvolutionStatus, evolveParameters, getCurrentBest } from "../engines/param-evolution.js";
 import { getDecayCurves } from "../engines/signal-decay.js";
+import { ensemblePredict, getEnsembleWeights, getModelPerformance } from "../engines/ensemble.js";
+import { forecastRegime, getTransitionMatrix, getRegimeDurations, bootstrapFromHistory } from "../engines/regime-forecaster.js";
+import { takeSnapshot, loadLatestSnapshot, getSnapshotHistory, startSnapshotSchedule } from "../maintenance/state-snapshots.js";
+import { getFactorImportance, getWinningFactorProfile } from "../engines/factor-attribution.js";
 import { runStressTest, getTailRisk } from "../portfolio/stress-test.js";
 import { getDecisionHistory, getNearMisses, getFilterCostAnalysis } from "../trading/decision-tracker.js";
 import { getHedgeRecommendations, getCategoryExposure, getPortfolioBeta } from "../portfolio/hedge-engine.js";
@@ -840,6 +844,61 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     return getPortfolioBeta(days);
   });
 
+  /* ── Model Ensemble ── */
+
+  app.get("/api/models/ensemble/weights", async () => {
+    return getEnsembleWeights();
+  });
+
+  app.get("/api/models/ensemble/performance", async () => {
+    return getModelPerformance();
+  });
+
+  /* ── Regime Forecaster ── */
+
+  app.get("/api/regime/forecast", async (req) => {
+    const current = req.query.current || "RANGE";
+    const hour = new Date().getUTCHours();
+    const day = new Date().getUTCDay();
+    return forecastRegime(current, { hour, dayOfWeek: day });
+  });
+
+  app.get("/api/regime/transition-matrix", async () => {
+    return getTransitionMatrix();
+  });
+
+  app.get("/api/regime/durations", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getRegimeDurations(days);
+  });
+
+  /* ── State Snapshots ── */
+
+  app.get("/api/system/snapshots", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getSnapshotHistory(limit);
+  });
+
+  app.get("/api/system/snapshot/latest", async () => {
+    return loadLatestSnapshot() || { message: "No snapshots yet" };
+  });
+
+  app.post("/api/system/snapshot", { preHandler: requireAuth }, async () => {
+    return takeSnapshot("manual");
+  });
+
+  /* ── Factor Attribution ── */
+
+  app.get("/api/analytics/factor-importance", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getFactorImportance(days);
+  });
+
+  app.get("/api/analytics/winning-profile", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getWinningFactorProfile(days);
+  });
+
   /* ── Trading Status API ── */
 
   app.get("/api/trading/status", async () => {
@@ -1206,6 +1265,8 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   // Start scheduled background tasks
   startTrialReminderSchedule();
   startMaintenanceSchedule();
+  startSnapshotSchedule();
+  bootstrapFromHistory(30);
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`Web dashboard: http://localhost:${PORT}`);

@@ -167,6 +167,18 @@
   <div class="section-title">Parameter Evolution</div>
   <div id="paramEvolutionEndpoints"></div>
 
+  <div class="section-title">Model Ensemble</div>
+  <div id="ensembleEndpoints"></div>
+
+  <div class="section-title">Regime Forecaster</div>
+  <div id="regimeEndpoints"></div>
+
+  <div class="section-title">Factor Attribution</div>
+  <div id="factorEndpoints"></div>
+
+  <div class="section-title">State Snapshots</div>
+  <div id="snapshotEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -362,6 +374,24 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/evolution", desc: "Parameter evolution status: generation, population size, best-ever params and fitness", tryable: true },
     { method: "GET", path: "/api/trading/evolution/best", desc: "Current best evolved parameter set (confidence, edge, sizing, quality gate)", tryable: true },
     { method: "POST", path: "/api/trading/evolution/evolve", desc: "Manually trigger one generation of parameter evolution (auth required)" }
+  ],
+  ensembleEndpoints: [
+    { method: "GET", path: "/api/models/ensemble/weights", desc: "Current ensemble model weights: momentum, mean-reversion, orderbook, macro — with accuracy and prediction counts", tryable: true },
+    { method: "GET", path: "/api/models/ensemble/performance", desc: "Per-model accuracy, weight, and prediction count for all ensemble models", tryable: true }
+  ],
+  regimeEndpoints: [
+    { method: "GET", path: "/api/regime/forecast", desc: "Markov chain regime forecast: predicted next regime with confidence, transition probabilities, hour/day bias", tryable: true },
+    { method: "GET", path: "/api/regime/transition-matrix", desc: "Full regime transition probability matrix (TREND_UP, TREND_DOWN, RANGE, CHOP)", tryable: true },
+    { method: "GET", path: "/api/regime/durations?days=30", desc: "Regime duration distribution from historical signal data", tryable: true }
+  ],
+  factorEndpoints: [
+    { method: "GET", path: "/api/analytics/factor-importance?days=30", desc: "Factor importance ranking: Pearson correlation for numeric factors, information gain for categorical factors, with win/loss breakdowns", tryable: true },
+    { method: "GET", path: "/api/analytics/winning-profile?days=30", desc: "Winning trade factor profile: avg quality, confidence, edge, and bet size for wins vs losses", tryable: true }
+  ],
+  snapshotEndpoints: [
+    { method: "GET", path: "/api/system/snapshots?limit=50", desc: "State snapshot history: periodic captures of open positions, risk state, bot state, learning version", tryable: true },
+    { method: "GET", path: "/api/system/snapshot/latest", desc: "Latest state snapshot with full detail for crash recovery", tryable: true },
+    { method: "POST", path: "/api/system/snapshot", desc: "Manually take a state snapshot (auth required)" }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

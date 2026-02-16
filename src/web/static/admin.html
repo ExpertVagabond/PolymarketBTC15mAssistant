@@ -292,6 +292,30 @@
       <div id="tailRiskBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Model Ensemble -->
+    <div class="card">
+      <div class="card-title">Model Ensemble</div>
+      <div id="ensembleBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Regime Forecast -->
+    <div class="card">
+      <div class="card-title">Regime Forecast</div>
+      <div id="regimeForecastBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Factor Attribution -->
+    <div class="card">
+      <div class="card-title">Factor Importance</div>
+      <div id="factorBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- State Snapshots -->
+    <div class="card">
+      <div class="card-title">State Snapshots</div>
+      <div id="snapshotBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -355,7 +379,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -387,7 +411,11 @@ async function loadAdmin() {
       fetch("/api/portfolio/stress-test").then(r => r.json()).catch(() => null),
       fetch("/api/trading/filter-cost?days=7").then(r => r.json()).catch(() => null),
       fetch("/api/portfolio/hedge").then(r => r.json()).catch(() => null),
-      fetch("/api/portfolio/tail-risk?days=90").then(r => r.json()).catch(() => null)
+      fetch("/api/portfolio/tail-risk?days=90").then(r => r.json()).catch(() => null),
+      fetch("/api/models/ensemble/performance").then(r => r.json()).catch(() => null),
+      fetch("/api/regime/forecast").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/factor-importance?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/system/snapshots?limit=10").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -420,6 +448,10 @@ async function loadAdmin() {
     if (filterCostData) renderDecisionTracker(filterCostData);
     if (hedgeData) renderHedge(hedgeData);
     if (tailRiskData) renderTailRisk(tailRiskData);
+    if (ensembleData) renderEnsemble(ensembleData);
+    if (regimeForecastData) renderRegimeForecast(regimeForecastData);
+    if (factorData) renderFactors(factorData);
+    if (snapshotData) renderSnapshots(snapshotData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1411,6 +1443,101 @@ function renderTailRisk(data) {
   html += `<div class="kv"><span class="k">Avg daily P&L</span><span class="v ${data.avgDailyPnl >= 0 ? "green" : "red"}">$${data.avgDailyPnl}</span></div>`;
   html += `<div class="kv"><span class="k">Daily Sharpe</span><span class="v">${data.dailySharpe}</span></div>`;
   html += `<div class="kv"><span class="k">Trading days</span><span class="v">${data.tradingDays}</span></div>`;
+
+  el.innerHTML = html;
+}
+
+function renderEnsemble(data) {
+  const el = $("ensembleBlock");
+  if (!el) return;
+  if (!data || !data.models) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No ensemble data</div>';
+    return;
+  }
+
+  let html = '';
+  for (const m of data.models) {
+    const accColor = (m.accuracy || 0) >= 0.55 ? "green" : (m.accuracy || 0) >= 0.45 ? "amber" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(m.name)}</span><span class="v" style="font-size:10px">w: ${(m.weight || 0).toFixed(3)} | <span class="${accColor}">${((m.accuracy || 0) * 100).toFixed(1)}%</span> (${m.predictions || 0})</span></div>`;
+  }
+
+  if (data.agreement != null) {
+    const agColor = data.agreement >= 0.7 ? "green" : data.agreement >= 0.5 ? "amber" : "red";
+    html += `<div class="kv"><span class="k">Agreement</span><span class="v ${agColor}">${(data.agreement * 100).toFixed(0)}%</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRegimeForecast(data) {
+  const el = $("regimeForecastBlock");
+  if (!el) return;
+  if (!data || !data.predicted) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No forecast data</div>';
+    return;
+  }
+
+  const regColors = { TREND_UP: "green", TREND_DOWN: "red", RANGE: "blue", CHOP: "amber" };
+  const curColor = regColors[data.currentRegime] || "";
+  const predColor = regColors[data.predicted] || "";
+  let html = `<div class="kv"><span class="k">Current</span><span class="v ${curColor}">${data.currentRegime || "-"}</span></div>`;
+  html += `<div class="kv"><span class="k">Predicted</span><span class="v ${predColor}">${data.predicted}</span></div>`;
+  html += `<div class="kv"><span class="k">Confidence</span><span class="v">${data.confidence || 0}%</span></div>`;
+
+  if (data.probabilities) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">PROBABILITIES</div>';
+    for (const [regime, prob] of Object.entries(data.probabilities)) {
+      const barWidth = Math.round(prob * 100);
+      const c = regColors[regime] || "";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${regime}</span><span class="v ${c}" style="font-size:10px">${(prob * 100).toFixed(1)}%</span></div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderFactors(data) {
+  const el = $("factorBlock");
+  if (!el) return;
+  if (!data || data.insufficient) {
+    el.innerHTML = `<div style="color:#4b5563;font-size:12px">Insufficient data (${data?.sampleSize || 0} trades, need 20+)</div>`;
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Sample size</span><span class="v">${data.sampleSize} trades (${data.days}d)</span></div>`;
+  html += `<div class="kv"><span class="k">Base win rate</span><span class="v">${((data.baseWinRate || 0) * 100).toFixed(1)}%</span></div>`;
+
+  for (const f of (data.factors || []).slice(0, 6)) {
+    if (f.type === "numeric") {
+      const dirLabel = f.direction === "higher_is_better" ? "↑" : "↓";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(f.factor)} ${dirLabel}</span><span class="v" style="font-size:10px">r=${f.correlation} | W:${f.avgWin} L:${f.avgLoss}</span></div>`;
+    } else {
+      const top = (f.breakdown || [])[0];
+      const topStr = top ? ` (best: ${top.value} ${(top.winRate * 100).toFixed(0)}%)` : "";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(f.factor)}</span><span class="v" style="font-size:10px">IG=${f.infoGain}${topStr}</span></div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderSnapshots(data) {
+  const el = $("snapshotBlock");
+  if (!el) return;
+  if (!data || !data.snapshots || data.snapshots.length === 0) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No snapshots yet</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Total</span><span class="v blue">${data.totalSnapshots || data.snapshots.length}</span></div>`;
+  if (data.lastSnapshotAt) {
+    html += `<div class="kv"><span class="k">Last</span><span class="v">${new Date(data.lastSnapshotAt).toLocaleTimeString()}</span></div>`;
+  }
+
+  for (const s of data.snapshots.slice(0, 5)) {
+    const typeColor = s.type === "startup" ? "blue" : s.type === "shutdown" ? "amber" : "";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${new Date(s.timestamp).toLocaleTimeString()}</span><span class="v ${typeColor}" style="font-size:10px">${s.type} | ${s.botState} | ${s.openPositions}pos</span></div>`;
+  }
 
   el.innerHTML = html;
 }
