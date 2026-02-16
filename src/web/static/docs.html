@@ -227,6 +227,18 @@
   <div class="section-title">Trade Journal & Patterns</div>
   <div id="tradeJournalEndpoints"></div>
 
+  <div class="section-title">Order Execution Algorithms</div>
+  <div id="orderAlgoEndpoints"></div>
+
+  <div class="section-title">Predictive Circuit Breaker</div>
+  <div id="breakerEndpoints"></div>
+
+  <div class="section-title">Kalman Signal Fusion</div>
+  <div id="kalmanEndpoints"></div>
+
+  <div class="section-title">Market Impact Model</div>
+  <div id="impactEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -508,6 +520,23 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/journal?days=14", desc: "Trade journal: auto-tagged entries with entry quality, exit quality, post-mortem tags (textbook, avoidable, lucky, execution_issue), and pattern signatures", tryable: true },
     { method: "GET", path: "/api/trading/patterns?days=30", desc: "Pattern discovery: winning and losing setup clusters by regime×category×confidence×quality with insights and regime-specific performance", tryable: true },
     { method: "GET", path: "/api/trading/drawdown-analysis?days=30", desc: "Drawdown root cause analysis: identifies losing streaks (3+), dominant regimes/categories during drawdowns, and recurring root causes", tryable: true }
+  ],
+  orderAlgoEndpoints: [
+    { method: "GET", path: "/api/trading/order-strategy?shares=20&side=YES&marketId=abc", desc: "Order execution strategy recommendation: analyzes market conditions and recommends TWAP, VWAP, Iceberg, or market order with full execution plans for each", tryable: true },
+    { method: "GET", path: "/api/trading/algorithm-performance?days=14", desc: "Algorithm performance comparison: win rate and average slippage by execution method from historical fills", tryable: true }
+  ],
+  breakerEndpoints: [
+    { method: "GET", path: "/api/trading/breaker-status", desc: "Predictive circuit breaker status: current state (normal/cautious/halted), recent halt history, daily P&L with breach tracking", tryable: true },
+    { method: "POST", path: "/api/trading/breaker-evaluate", desc: "Evaluate breaker with current context: regime-aware thresholds, breach probability gates, volatility gates, position heat tracking, combined stress (auth required)" },
+    { method: "POST", path: "/api/trading/breaker-reset", desc: "Reset circuit breaker to normal state (auth required)" }
+  ],
+  kalmanEndpoints: [
+    { method: "GET", path: "/api/engines/kalman-fusion", desc: "Kalman filter signal fusion overview: blended direction signals with uncertainty bounds across all tracked markets, net direction, strong signal count", tryable: true },
+    { method: "GET", path: "/api/engines/kalman-diagnostics", desc: "Kalman filter diagnostics: filter count, avg uncertainty, regime noise multipliers, timeframe config (1m/5m/15m noise variance and weights)", tryable: true }
+  ],
+  impactEndpoints: [
+    { method: "GET", path: "/api/trading/impact-curves?marketId=abc&regime=RANGE", desc: "Market impact curves: linear and square-root impact models at 7 order sizes (1-100 shares) with cost-per-share and optimal range identification", tryable: true },
+    { method: "GET", path: "/api/trading/impact-calibration?days=30", desc: "Impact model calibration: empirical slippage by regime and category from historical executions with P95 and max values", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

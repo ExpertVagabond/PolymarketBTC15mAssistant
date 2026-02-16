@@ -412,6 +412,30 @@
       <div id="tradeJournalBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Order Algorithms (Tier 36) -->
+    <div class="card">
+      <div class="card-title">Order Algorithms</div>
+      <div id="orderAlgoBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Predictive Breaker (Tier 36) -->
+    <div class="card">
+      <div class="card-title">Circuit Breaker</div>
+      <div id="breakerBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Kalman Fusion (Tier 36) -->
+    <div class="card">
+      <div class="card-title">Kalman Signal Fusion</div>
+      <div id="kalmanBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Market Impact (Tier 36) -->
+    <div class="card">
+      <div class="card-title">Market Impact</div>
+      <div id="impactBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -475,7 +499,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -527,7 +551,11 @@ async function loadAdmin() {
       fetch("/api/analytics/volatility-surface").then(r => r.json()).catch(() => null),
       fetch("/api/portfolio/var?days=30").then(r => r.json()).catch(() => null),
       fetch("/api/engines/online-learner").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/patterns?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/patterns?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/algorithm-performance?days=14").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/breaker-status").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/kalman-fusion").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/impact-calibration?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -580,6 +608,10 @@ async function loadAdmin() {
     if (varData) renderRiskBudget(varData);
     if (onlineLearnerData) renderOnlineLearner(onlineLearnerData);
     if (patternsData) renderTradeJournal(patternsData);
+    if (algoPerf) renderOrderAlgo(algoPerf);
+    if (breakerData) renderBreaker(breakerData);
+    if (kalmanData) renderKalman(kalmanData);
+    if (impactData) renderImpact(impactData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2054,6 +2086,97 @@ function renderTradeJournal(data) {
     }
   }
   if (!html) html = '<div style="color:#4b5563;font-size:12px">Insufficient trade data for patterns</div>';
+  el.innerHTML = html;
+}
+
+function renderOrderAlgo(data) {
+  const el = $("orderAlgoBlock");
+  if (!el) return;
+  if (!data || !data.byAlgorithm) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No algorithm data</div>';
+    return;
+  }
+  let html = `<div class="kv"><span class="k">Total trades</span><span class="v">${data.totalTrades}</span></div>`;
+  if (data.recommendation) {
+    html += `<div style="font-size:10px;color:#6b7280;margin-bottom:4px">${esc(data.recommendation)}</div>`;
+  }
+  if (data.byAlgorithm.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY METHOD</div>';
+    for (const a of data.byAlgorithm.slice(0, 5)) {
+      const slipColor = a.avgSlippageBps > 15 ? 'red' : a.avgSlippageBps > 5 ? 'amber' : 'green';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(a.method)}</span><span class="v ${slipColor}" style="font-size:10px">${a.avgSlippageBps}bps / ${(a.winRate * 100).toFixed(0)}% WR (${a.trades})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderBreaker(data) {
+  const el = $("breakerBlock");
+  if (!el) return;
+  if (!data || !data.current) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No breaker data</div>';
+    return;
+  }
+  const c = data.current;
+  const statusColor = c.status === 'normal' ? 'green' : c.status === 'cautious' ? 'amber' : 'red';
+  let html = `<div class="kv"><span class="k">Status</span><span class="v ${statusColor}">${esc(c.status).toUpperCase()}</span></div>`;
+  if (c.reason) html += `<div class="kv"><span class="k">Reason</span><span class="v" style="font-size:10px">${esc(c.reason)}</span></div>`;
+  if (data.stats) {
+    html += `<div class="kv"><span class="k">Halts (7d)</span><span class="v">${data.stats.haltsLast7Days}</span></div>`;
+    html += `<div class="kv"><span class="k">Loss days (7d)</span><span class="v ${data.stats.lossDaysLast7 > 3 ? 'red' : 'green'}">${data.stats.lossDaysLast7}/${data.stats.totalDays}</span></div>`;
+    html += `<div class="kv"><span class="k">Avg daily P&L</span><span class="v ${data.stats.avgDailyPnl >= 0 ? 'green' : 'red'}">$${data.stats.avgDailyPnl}</span></div>`;
+  }
+  if (data.recentDays && data.recentDays.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">RECENT DAYS</div>';
+    for (const d of data.recentDays.slice(0, 5)) {
+      const dayColor = d.pnl >= 0 ? 'green' : d.wouldHalt ? 'red' : 'amber';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(d.date)}</span><span class="v ${dayColor}" style="font-size:10px">$${d.pnl} (${d.trades}t)</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderKalman(data) {
+  const el = $("kalmanBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No fusion data</div>';
+    return;
+  }
+  const s = data.summary;
+  let html = `<div class="kv"><span class="k">Filters active</span><span class="v">${s.count}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg confidence</span><span class="v">${esc(String(s.avgConfidence))}</span></div>`;
+  html += `<div class="kv"><span class="k">Net direction</span><span class="v ${s.netDirection === 'bullish' ? 'green' : s.netDirection === 'bearish' ? 'red' : 'amber'}">${esc(s.netDirection)}</span></div>`;
+  html += `<div class="kv"><span class="k">Strong signals</span><span class="v">${s.strongSignals}</span></div>`;
+  html += `<div class="kv"><span class="k">Bullish / Bearish</span><span class="v"><span class="green">${s.bullish}</span> / <span class="red">${s.bearish}</span></span></div>`;
+  if (data.markets && data.markets.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">TOP SIGNALS</div>';
+    for (const m of data.markets.slice(0, 4)) {
+      const sigColor = m.direction === 'bullish' ? 'green' : m.direction === 'bearish' ? 'red' : 'amber';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(m.marketId).slice(0,12)}</span><span class="v ${sigColor}" style="font-size:10px">${m.signal} (${esc(m.confidence)})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderImpact(data) {
+  const el = $("impactBlock");
+  if (!el) return;
+  if (!data || !data.modelFit) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No impact data</div>';
+    return;
+  }
+  const f = data.modelFit;
+  let html = `<div class="kv"><span class="k">Sample size</span><span class="v">${f.sampleSize}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg slippage</span><span class="v ${f.avgSlippageBps > 15 ? 'red' : 'amber'}">${f.avgSlippageBps} bps</span></div>`;
+  html += `<div class="kv"><span class="k">P95 slippage</span><span class="v red">${f.p95SlippageBps} bps</span></div>`;
+  html += `<div class="kv"><span class="k">Max slippage</span><span class="v red">${f.maxSlippageBps} bps</span></div>`;
+  if (data.calibration && data.calibration.byRegime) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY REGIME</div>';
+    for (const [r, d] of Object.entries(data.calibration.byRegime).slice(0, 4)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(r)}</span><span class="v" style="font-size:10px">${d.avgSlippageBps}±${d.stdSlippageBps} bps (${d.sampleSize})</span></div>`;
+    }
+  }
   el.innerHTML = html;
 }
 

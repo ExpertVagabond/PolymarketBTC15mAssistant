@@ -85,6 +85,10 @@ import { getVolSurfaceOverview, getMarketVolSurface } from "../engines/volatilit
 import { computeVaR, getRiskBudgets, getRiskDecomposition } from "../portfolio/risk-budgeting.js";
 import { getOnlineLearnerStatus, bootstrapFromHistory as bootstrapOnlineLearner } from "../engines/online-learner.js";
 import { getTradeJournal, discoverPatterns, getDrawdownAnalysis } from "../trading/trade-journal.js";
+import { recommendStrategy, getAlgorithmPerformance } from "../trading/order-algorithms.js";
+import { evaluateBreaker, getBreakerStatus, resetBreaker } from "../trading/predictive-breaker.js";
+import { getFusionOverview, getFilterDiagnostics } from "../engines/kalman-fusion.js";
+import { getImpactCurves, calibrateImpactModel } from "../trading/market-impact.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1124,6 +1128,62 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/trading/drawdown-analysis", async (req) => {
     const days = Math.min(Number(req.query.days) || 30, 180);
     return getDrawdownAnalysis(days);
+  });
+
+  /* ── Order Algorithms API (Tier 36) ── */
+
+  app.get("/api/trading/order-strategy", async (req) => {
+    const shares = Number(req.query.shares) || 10;
+    const side = req.query.side || "YES";
+    const marketId = req.query.marketId || "";
+    return recommendStrategy({ totalShares: shares, side, marketId }, {
+      spread: Number(req.query.spread) || 0.05,
+      volume24h: Number(req.query.volume) || 1000
+    });
+  });
+
+  app.get("/api/trading/algorithm-performance", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return getAlgorithmPerformance(days);
+  });
+
+  /* ── Predictive Circuit Breaker API (Tier 36) ── */
+
+  app.get("/api/trading/breaker-status", async () => {
+    return getBreakerStatus();
+  });
+
+  app.post("/api/trading/breaker-evaluate", { preHandler: requireAuth }, async (req) => {
+    return evaluateBreaker(req.body || {});
+  });
+
+  app.post("/api/trading/breaker-reset", { preHandler: requireAuth }, async (req) => {
+    return resetBreaker(req.body?.reason || "manual_reset");
+  });
+
+  /* ── Kalman Fusion API (Tier 36) ── */
+
+  app.get("/api/engines/kalman-fusion", async () => {
+    return getFusionOverview();
+  });
+
+  app.get("/api/engines/kalman-diagnostics", async () => {
+    return getFilterDiagnostics();
+  });
+
+  /* ── Market Impact API (Tier 36) ── */
+
+  app.get("/api/trading/impact-curves", async (req) => {
+    const marketId = req.query.marketId || "";
+    return getImpactCurves(marketId, {
+      regime: req.query.regime || "RANGE",
+      category: req.query.category || "crypto"
+    });
+  });
+
+  app.get("/api/trading/impact-calibration", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return calibrateImpactModel(days);
   });
 
   /* ── Trading Status API ── */
