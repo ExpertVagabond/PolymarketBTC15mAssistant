@@ -388,6 +388,30 @@
       <div id="sentimentBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Volatility Surface (Tier 35) -->
+    <div class="card">
+      <div class="card-title">Volatility Surface</div>
+      <div id="volSurfaceBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Risk Budgeting (Tier 35) -->
+    <div class="card">
+      <div class="card-title">Risk Budgeting (VaR)</div>
+      <div id="riskBudgetBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Online Learner (Tier 35) -->
+    <div class="card">
+      <div class="card-title">Online Learner</div>
+      <div id="onlineLearnerBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Trade Journal (Tier 35) -->
+    <div class="card">
+      <div class="card-title">Trade Journal</div>
+      <div id="tradeJournalBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -451,7 +475,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -499,7 +523,11 @@ async function loadAdmin() {
       fetch("/api/trading/implementation-shortfall?days=30").then(r => r.json()).catch(() => null),
       fetch("/api/portfolio/optimize").then(r => r.json()).catch(() => null),
       fetch("/api/analytics/arbitrage").then(r => r.json()).catch(() => null),
-      fetch("/api/analytics/sentiment").then(r => r.json()).catch(() => null)
+      fetch("/api/analytics/sentiment").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/volatility-surface").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/var?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/online-learner").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/patterns?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -548,6 +576,10 @@ async function loadAdmin() {
     if (portfolioOptData) renderPortfolioOpt(portfolioOptData);
     if (arbitrageData) renderArbitrage(arbitrageData);
     if (sentimentData) renderSentiment(sentimentData);
+    if (volSurfaceData) renderVolSurface(volSurfaceData);
+    if (varData) renderRiskBudget(varData);
+    if (onlineLearnerData) renderOnlineLearner(onlineLearnerData);
+    if (patternsData) renderTradeJournal(patternsData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1930,6 +1962,98 @@ function renderSentiment(data) {
       html += `<div class="kv"><span class="k" style="font-size:10px">${esc(c.category)}</span><span class="v ${catColor}" style="font-size:10px">${c.avgScore > 0 ? '+' : ''}${c.avgScore} (${c.marketCount})</span></div>`;
     }
   }
+  el.innerHTML = html;
+}
+
+function renderVolSurface(data) {
+  const el = $("volSurfaceBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No volatility data</div>';
+    return;
+  }
+  const s = data.summary;
+  let html = `<div class="kv"><span class="k">Markets</span><span class="v">${s.count}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg IV</span><span class="v ${s.avgImpliedVol > 1.0 ? 'red' : 'green'}">${(s.avgImpliedVol * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Avg HV</span><span class="v">${(s.avgHistoricalVol * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Vol premium</span><span class="v ${s.avgVolPremium > 0 ? 'amber' : 'green'}">${(s.avgVolPremium * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">High vol</span><span class="v ${s.highVolMarkets > 0 ? 'red' : 'green'}">${s.highVolMarkets}</span></div>`;
+  html += `<div class="kv"><span class="k">Skewed</span><span class="v">${s.skewedMarkets}</span></div>`;
+  if (data.categoryBreakdown && data.categoryBreakdown.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY CATEGORY</div>';
+    for (const c of data.categoryBreakdown.slice(0, 5)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(c.category)}</span><span class="v" style="font-size:10px">IV ${(c.avgIV * 100).toFixed(0)}% / HV ${(c.avgHV * 100).toFixed(0)}% (${c.count})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderRiskBudget(data) {
+  const el = $("riskBudgetBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No VaR data</div>';
+    return;
+  }
+  const s = data.summary;
+  let html = `<div class="kv"><span class="k">Historical VaR (95%)</span><span class="v red">$${data.historicalVaR}</span></div>`;
+  html += `<div class="kv"><span class="k">Parametric VaR</span><span class="v amber">$${data.parametricVaR}</span></div>`;
+  html += `<div class="kv"><span class="k">CVaR (Exp. Shortfall)</span><span class="v red">$${data.cvar}</span></div>`;
+  html += `<div class="kv"><span class="k">Daily Sharpe</span><span class="v ${s.sharpeDaily > 0 ? 'green' : 'red'}">${s.sharpeDaily}</span></div>`;
+  html += `<div class="kv"><span class="k">Sample days</span><span class="v">${s.days}</span></div>`;
+  html += `<div class="kv"><span class="k">VaR breaches</span><span class="v ${s.breachDays > s.expectedBreaches ? 'red' : 'green'}">${s.breachDays} (expected ${s.expectedBreaches})</span></div>`;
+  html += `<div class="kv"><span class="k">Worst day</span><span class="v red">$${s.worstDay}</span></div>`;
+  html += `<div class="kv"><span class="k">Best day</span><span class="v green">$${s.bestDay}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderOnlineLearner(data) {
+  const el = $("onlineLearnerBlock");
+  if (!el) return;
+  if (!data) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No learner data</div>';
+    return;
+  }
+  const accColor = data.recentAccuracy >= 0.6 ? 'green' : data.recentAccuracy >= 0.5 ? 'amber' : 'red';
+  let html = `<div class="kv"><span class="k">Iterations</span><span class="v">${data.totalUpdates}</span></div>`;
+  html += `<div class="kv"><span class="k">LR phase</span><span class="v">${data.lrPhase} (${data.learningRate})</span></div>`;
+  html += `<div class="kv"><span class="k">Recent accuracy</span><span class="v ${accColor}">${(data.recentAccuracy * 100).toFixed(1)}% (n=${data.recentSampleSize})</span></div>`;
+  html += `<div class="kv"><span class="k">Overall accuracy</span><span class="v">${(data.overallAccuracy * 100).toFixed(1)}%</span></div>`;
+  if (data.featureRanking && data.featureRanking.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">TOP FEATURES</div>';
+    for (const f of data.featureRanking.slice(0, 5)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(f.feature)}</span><span class="v" style="font-size:10px">${(f.share * 100).toFixed(0)}%</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderTradeJournal(data) {
+  const el = $("tradeJournalBlock");
+  if (!el) return;
+  if (!data || !data.winningPatterns) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No pattern data</div>';
+    return;
+  }
+  let html = '';
+  if (data.insights && data.insights.length > 0) {
+    for (const ins of data.insights.slice(0, 3)) {
+      html += `<div style="font-size:10px;color:#6b7280;margin-bottom:4px">${esc(ins)}</div>`;
+    }
+  }
+  if (data.winningPatterns.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">WINNING PATTERNS</div>';
+    for (const p of data.winningPatterns.slice(0, 4)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(p.regime)} + ${esc(p.category)}</span><span class="v green" style="font-size:10px">${(p.winRate * 100).toFixed(0)}% WR (${p.count})</span></div>`;
+    }
+  }
+  if (data.losingPatterns.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">LOSING PATTERNS</div>';
+    for (const p of data.losingPatterns.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(p.regime)} + ${esc(p.category)}</span><span class="v red" style="font-size:10px">${(p.winRate * 100).toFixed(0)}% WR (${p.count})</span></div>`;
+    }
+  }
+  if (!html) html = '<div style="color:#4b5563;font-size:12px">Insufficient trade data for patterns</div>';
   el.innerHTML = html;
 }
 

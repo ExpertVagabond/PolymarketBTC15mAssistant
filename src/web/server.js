@@ -81,6 +81,10 @@ import { getImplementationShortfall, getCounterfactualAnalysis, getFactorPnlAttr
 import { optimizePortfolio, getRebalanceSchedule, getEfficientFrontier } from "../portfolio/optimizer.js";
 import { scanArbitrageOpportunities, getArbitrageHeatmap } from "../engines/arbitrage-detector.js";
 import { getAggregateSentiment, getSentimentMomentum } from "../engines/sentiment-scorer.js";
+import { getVolSurfaceOverview, getMarketVolSurface } from "../engines/volatility-surface.js";
+import { computeVaR, getRiskBudgets, getRiskDecomposition } from "../portfolio/risk-budgeting.js";
+import { getOnlineLearnerStatus, bootstrapFromHistory as bootstrapOnlineLearner } from "../engines/online-learner.js";
+import { getTradeJournal, discoverPatterns, getDrawdownAnalysis } from "../trading/trade-journal.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1064,6 +1068,62 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/analytics/sentiment/momentum", async () => {
     return getSentimentMomentum();
+  });
+
+  /* ── Volatility Surface API (Tier 35) ── */
+
+  app.get("/api/analytics/volatility-surface", async () => {
+    return getVolSurfaceOverview();
+  });
+
+  app.get("/api/analytics/volatility-surface/:marketId", async (req) => {
+    return getMarketVolSurface(req.params.marketId) || { error: "no_data" };
+  });
+
+  /* ── Risk Budgeting API (Tier 35) ── */
+
+  app.get("/api/portfolio/var", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    const confidence = Number(req.query.confidence) || 0.95;
+    return computeVaR(days, { confidence });
+  });
+
+  app.get("/api/portfolio/risk-budgets", async (req) => {
+    const totalRisk = Number(req.query.budget) || 100;
+    const regime = req.query.regime || "RANGE";
+    return getRiskBudgets({ totalRiskUsd: totalRisk, currentRegime: regime });
+  });
+
+  app.get("/api/portfolio/risk-decomposition", async () => {
+    return getRiskDecomposition();
+  });
+
+  /* ── Online Learner API (Tier 35) ── */
+
+  app.get("/api/engines/online-learner", async () => {
+    return getOnlineLearnerStatus();
+  });
+
+  app.post("/api/engines/online-learner/bootstrap", { preHandler: requireAuth }, async (req) => {
+    const days = Math.min(Number(req.body?.days) || 7, 30);
+    return bootstrapOnlineLearner(days);
+  });
+
+  /* ── Trade Journal API (Tier 35) ── */
+
+  app.get("/api/trading/journal", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return getTradeJournal(days);
+  });
+
+  app.get("/api/trading/patterns", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return discoverPatterns(days);
+  });
+
+  app.get("/api/trading/drawdown-analysis", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getDrawdownAnalysis(days);
   });
 
   /* ── Trading Status API ── */

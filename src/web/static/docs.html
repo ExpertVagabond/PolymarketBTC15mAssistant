@@ -215,6 +215,18 @@
   <div class="section-title">Market Sentiment</div>
   <div id="sentimentEndpoints"></div>
 
+  <div class="section-title">Volatility Surface</div>
+  <div id="volSurfaceEndpoints"></div>
+
+  <div class="section-title">Risk Budgeting (VaR)</div>
+  <div id="riskBudgetEndpoints"></div>
+
+  <div class="section-title">Online Learner</div>
+  <div id="onlineLearnerEndpoints"></div>
+
+  <div class="section-title">Trade Journal & Patterns</div>
+  <div id="tradeJournalEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -478,6 +490,24 @@ const ENDPOINTS = {
   sentimentEndpoints: [
     { method: "GET", path: "/api/analytics/sentiment", desc: "Market sentiment: aggregate bullish/bearish/neutral scores (-100 to +100) derived from price momentum, volume, spreads, orderbook imbalance, and volatility", tryable: true },
     { method: "GET", path: "/api/analytics/sentiment/momentum", desc: "Sentiment momentum: detects directional shifts in market sentiment with magnitude and category breakdown", tryable: true }
+  ],
+  volSurfaceEndpoints: [
+    { method: "GET", path: "/api/analytics/volatility-surface", desc: "Volatility surface overview: implied vol, historical vol, vol premium, term structure, smile/skew detection, and Greeks (delta/gamma/vega/theta) across all tracked markets", tryable: true },
+    { method: "GET", path: "/api/analytics/volatility-surface/:marketId", desc: "Per-market volatility surface with full term structure, smile curve, skew direction, and Greek values" }
+  ],
+  riskBudgetEndpoints: [
+    { method: "GET", path: "/api/portfolio/var?days=30", desc: "Value-at-Risk: historical VaR, parametric VaR, and CVaR (Expected Shortfall) at configurable confidence levels with daily P&L series and breach tracking", tryable: true },
+    { method: "GET", path: "/api/portfolio/risk-budgets?budget=100&regime=RANGE", desc: "Per-market risk budgets: inverse-volatility-weighted allocation of total risk budget with regime adjustment and concentration caps", tryable: true },
+    { method: "GET", path: "/api/portfolio/risk-decomposition", desc: "Risk decomposition: per-position risk scores, exposure concentration (HHI), category concentration, and rebalancing recommendations", tryable: true }
+  ],
+  onlineLearnerEndpoints: [
+    { method: "GET", path: "/api/engines/online-learner", desc: "Online learner status: SGD weight vectors, learning rate phase (warmup/steady/decay), feature importance ranking, per-regime accuracy, recent prediction accuracy", tryable: true },
+    { method: "POST", path: "/api/engines/online-learner/bootstrap", desc: "Bootstrap online learner from historical trade data (auth required). Single pass over recent trades to initialize weights." }
+  ],
+  tradeJournalEndpoints: [
+    { method: "GET", path: "/api/trading/journal?days=14", desc: "Trade journal: auto-tagged entries with entry quality, exit quality, post-mortem tags (textbook, avoidable, lucky, execution_issue), and pattern signatures", tryable: true },
+    { method: "GET", path: "/api/trading/patterns?days=30", desc: "Pattern discovery: winning and losing setup clusters by regime×category×confidence×quality with insights and regime-specific performance", tryable: true },
+    { method: "GET", path: "/api/trading/drawdown-analysis?days=30", desc: "Drawdown root cause analysis: identifies losing streaks (3+), dominant regimes/categories during drawdowns, and recurring root causes", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
