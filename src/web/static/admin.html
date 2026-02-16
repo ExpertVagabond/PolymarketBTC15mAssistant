@@ -484,6 +484,30 @@
       <div id="eventImpactBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Portfolio Drift (Tier 39) -->
+    <div class="card">
+      <div class="card-title">Portfolio Drift</div>
+      <div id="driftBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Cost Optimizer (Tier 39) -->
+    <div class="card">
+      <div class="card-title">Cost Optimization</div>
+      <div id="costOptBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Signal Arbiter (Tier 39) -->
+    <div class="card">
+      <div class="card-title">Signal Arbiter</div>
+      <div id="arbiterBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Recovery Predictor (Tier 39) -->
+    <div class="card">
+      <div class="card-title">Recovery Predictor</div>
+      <div id="recoveryPredBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -547,7 +571,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData, driftMonData, costOptData, arbiterData, recoveryPredData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -611,7 +635,11 @@ async function loadAdmin() {
       fetch("/api/engines/contagion?days=7").then(r => r.json()).catch(() => null),
       fetch("/api/portfolio/adaptive-risk").then(r => r.json()).catch(() => null),
       fetch("/api/backtest/walk-forward?days=60").then(r => r.json()).catch(() => null),
-      fetch("/api/engines/event-impact?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/engines/event-impact?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/drift").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/cost-optimization").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/signal-arbiter").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/recovery").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -676,6 +704,10 @@ async function loadAdmin() {
     if (adaptiveRiskData) renderAdaptiveRisk(adaptiveRiskData);
     if (walkForwardData) renderWalkForward(walkForwardData);
     if (eventImpactData) renderEventImpact(eventImpactData);
+    if (driftMonData) renderDriftMonitor(driftMonData);
+    if (costOptData) renderCostOpt(costOptData);
+    if (arbiterData) renderArbiter(arbiterData);
+    if (recoveryPredData) renderRecoveryPred(recoveryPredData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2410,6 +2442,77 @@ function renderEventImpact(data) {
   const insights = data.insights || [];
   if (insights.length > 0) {
     html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(insights[0])}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderDriftMonitor(data) {
+  const el = $("driftBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Drift Score</span><span class="v" style="color:${data.driftScore > 50 ? '#ef4444' : data.driftScore > 25 ? '#f59e0b' : '#22c55e'}">${data.driftScore}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Rebalance Needed</span><span class="v">${data.rebalanceNeeded ? 'YES' : 'No'}</span></div>`;
+  const roi = data.roi || {};
+  html += `<div class="kv"><span class="k">ROI</span><span class="v">${roi.netROI || 0}x (${roi.paybackDays || 0}d payback)</span></div>`;
+  const top = data.topDrift || [];
+  if (top.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">TOP DRIFT</div>';
+    for (const d of top.slice(0, 4)) {
+      const c = d.direction === 'overweight' ? '#f59e0b' : d.direction === 'underweight' ? '#3b82f6' : '#9ca3af';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(d.category)}</span><span class="v" style="font-size:10px;color:${c}">${d.direction} ${(d.absDrift * 100).toFixed(1)}%</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderCostOpt(data) {
+  const el = $("costOptBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Avg Cost</span><span class="v">${data.avgCostBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k">Best Method</span><span class="v" style="color:#22c55e">${esc(data.bestMethod || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Worst Method</span><span class="v" style="color:#ef4444">${esc(data.worstMethod || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Smart Route Savings</span><span class="v">${data.sampleSavingsBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k">Methods Tracked</span><span class="v">${data.methodCount || 0}</span></div>`;
+  const recs = data.recommendations || [];
+  if (recs.length > 0) {
+    html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(recs[0])}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderArbiter(data) {
+  const el = $("arbiterBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Weight Confidence</span><span class="v">${data.weightConfidence || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Trades Analyzed</span><span class="v">${data.totalTradesAnalyzed || 0}</span></div>`;
+  const top = data.topSources || [];
+  if (top.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">TOP SOURCES</div>';
+    for (const s of top.slice(0, 4)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(s.source)}</span><span class="v" style="font-size:10px">WR ${(s.winRate * 100).toFixed(0)}% w:${s.weight}</span></div>`;
+    }
+  }
+  const veto = data.vetoRules || [];
+  if (veto.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">VETO RULES</div>';
+    for (const v of veto.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(v.regime)}</span><span class="v" style="font-size:10px">≥${v.minConfidence} conf, max ${v.maxSignals}</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderRecoveryPred(data) {
+  const el = $("recoveryPredBlock");
+  if (!el || !data) return;
+  const statusColor = data.status === 'recovering' ? '#22c55e' : data.status === 'deepening' ? '#ef4444' : '#9ca3af';
+  let html = `<div class="kv"><span class="k">Status</span><span class="v" style="color:${statusColor}">${esc(data.status || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Drawdown</span><span class="v">$${data.currentDrawdown || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Days to Breakeven</span><span class="v">${data.daysToBreakeven ?? 'N/A'}</span></div>`;
+  html += `<div class="kv"><span class="k">Regime</span><span class="v">${esc(data.regime || 'unknown')} (${esc(data.regimeStability || '?')})</span></div>`;
+  html += `<div class="kv"><span class="k">Resume Trading</span><span class="v" style="color:${data.resumeTrading ? '#22c55e' : '#ef4444'}">${data.resumeTrading ? 'YES' : 'No'} — ${esc(data.tradingSuggestion || '')}</span></div>`;
+  html += `<div class="kv"><span class="k">Confidence</span><span class="v">${data.recoveryConfidence || 0}</span></div>`;
+  if (data.recommendation) {
+    html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(data.recommendation)}</div>`;
   }
   el.innerHTML = html;
 }

@@ -97,6 +97,10 @@ import { getContagionOverview, getSpilloverMap, getCorrelationRegime, detectMark
 import { getAdaptiveRiskStatus, getAdaptivePositionLimits, runLiveStressTest, getDeleveragingPlan } from "../portfolio/adaptive-risk-limits.js";
 import { getWalkForwardSummary, runWalkForward } from "../backtest/walk-forward.js";
 import { getEventImpactOverview, getTimeOfDayProfile, getDayOfWeekProfile, matchHistoricalPatterns } from "../engines/event-impact.js";
+import { getDriftDashboard, trackPortfolioDrift, evaluateRebalancingROI } from "../portfolio/drift-monitor.js";
+import { getCostOptimizationDashboard, analyzeHistoricalCosts, computeOptimalSplit } from "../trading/cost-optimizer.js";
+import { getArbiterStatus, computeWinRateWeights, detectSignalConflict } from "../engines/signal-arbiter.js";
+import { getRecoveryDashboard, estimateRecoveryTime, detectRegimeTransitionSpeed } from "../portfolio/recovery-predictor.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1320,6 +1324,60 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
       category: req.query.category,
       confidence: Number(req.query.confidence) || 0.5
     });
+  });
+
+  /* ── Tier 39: Drift Monitor, Cost Optimizer, Signal Arbiter, Recovery ── */
+
+  app.get("/api/portfolio/drift", async () => {
+    return getDriftDashboard();
+  });
+
+  app.get("/api/portfolio/drift/detailed", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return trackPortfolioDrift({ days });
+  });
+
+  app.get("/api/portfolio/rebalancing-roi", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return evaluateRebalancingROI(days);
+  });
+
+  app.get("/api/trading/cost-optimization", async () => {
+    return getCostOptimizationDashboard();
+  });
+
+  app.get("/api/trading/historical-costs", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 180);
+    return analyzeHistoricalCosts(days);
+  });
+
+  app.get("/api/trading/optimal-split", async (req) => {
+    const shares = Math.min(Number(req.query.shares) || 25, 1000);
+    const depth = Math.min(Number(req.query.depth) || 50, 5000);
+    return computeOptimalSplit(shares, { depth });
+  });
+
+  app.get("/api/engines/signal-arbiter", async () => {
+    return getArbiterStatus();
+  });
+
+  app.get("/api/engines/signal-weights", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return computeWinRateWeights(days);
+  });
+
+  app.get("/api/portfolio/recovery", async () => {
+    return getRecoveryDashboard();
+  });
+
+  app.get("/api/portfolio/recovery/time", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return estimateRecoveryTime(days);
+  });
+
+  app.get("/api/portfolio/regime-transitions", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return detectRegimeTransitionSpeed(days);
   });
 
   /* ── Trading Status API ── */

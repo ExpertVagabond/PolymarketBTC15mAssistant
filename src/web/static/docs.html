@@ -263,6 +263,18 @@
   <div class="section-title">Event Impact Modeler</div>
   <div id="eventImpactEndpoints"></div>
 
+  <div class="section-title">Portfolio Drift Monitor</div>
+  <div id="driftEndpoints"></div>
+
+  <div class="section-title">Cost Optimization</div>
+  <div id="costOptEndpoints"></div>
+
+  <div class="section-title">Signal Arbiter</div>
+  <div id="arbiterEndpoints"></div>
+
+  <div class="section-title">Recovery Predictor</div>
+  <div id="recoveryPredEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -601,6 +613,25 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/engines/event-impact?days=30", desc: "Event impact overview: best/worst hours (UTC) and days, settlement proximity pattern, top category, cross-category insights", tryable: true },
     { method: "GET", path: "/api/engines/time-profile?days=30", desc: "Hourly performance profile: per-hour win rate, avg P&L, Sharpe proxy, trade count — identifies optimal trading windows", tryable: true },
     { method: "GET", path: "/api/engines/pattern-match?regime=RANGE&category=crypto&confidence=0.6", desc: "Historical pattern matching: finds past trades with similar regime/category/confidence and reports expected win rate, avg/median P&L, best/worst case", tryable: true }
+  ],
+  driftEndpoints: [
+    { method: "GET", path: "/api/portfolio/drift", desc: "Portfolio drift dashboard: drift score (0-100), category exceedances, rebalancing ROI with payback days, top drifted categories", tryable: true },
+    { method: "GET", path: "/api/portfolio/drift/detailed?days=7", desc: "Detailed drift per category: target vs actual allocation, severity (minor/moderate/severe/critical), over/underweight direction", tryable: true },
+    { method: "GET", path: "/api/portfolio/rebalancing-roi?days=7", desc: "Rebalancing cost-benefit: expected weekly benefit vs execution cost, net ROI multiplier, payback period, recommendation", tryable: true }
+  ],
+  costOptEndpoints: [
+    { method: "GET", path: "/api/trading/cost-optimization", desc: "Cost optimization dashboard: avg cost by method, best/worst execution methods, smart routing savings estimate", tryable: true },
+    { method: "GET", path: "/api/trading/historical-costs?days=14", desc: "Historical cost analysis: per-method trade count, win rate, avg P&L, implied cost in bps with ranking", tryable: true },
+    { method: "GET", path: "/api/trading/optimal-split?shares=25&depth=50", desc: "Optimal order splitting: slice count, per-slice size and slippage, comparison vs single order, spread savings", tryable: true }
+  ],
+  arbiterEndpoints: [
+    { method: "GET", path: "/api/engines/signal-arbiter", desc: "Signal arbiter status: win-rate weighted source rankings, weight confidence, regime veto rules (CHOP/RANGE/TREND thresholds)", tryable: true },
+    { method: "GET", path: "/api/engines/signal-weights?days=14", desc: "Win-rate weighted ensemble: per-source weight, confidence in weights, recent performance with trade count and P&L", tryable: true }
+  ],
+  recoveryPredEndpoints: [
+    { method: "GET", path: "/api/portfolio/recovery", desc: "Recovery dashboard: status (recovering/deepening), drawdown amount, days to breakeven, regime stability, resume-trading signal with conditions", tryable: true },
+    { method: "GET", path: "/api/portfolio/recovery/time?days=30", desc: "Recovery time estimate: optimistic/base/pessimistic paths, daily P&L rate, confidence, high water mark distance", tryable: true },
+    { method: "GET", path: "/api/portfolio/regime-transitions?days=14", desc: "Regime transition speed: transition count and frequency, avg gap between shifts, sharpness score, reversal risk level", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
