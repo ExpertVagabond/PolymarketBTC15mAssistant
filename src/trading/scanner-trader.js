@@ -19,6 +19,7 @@ import { broadcastTradeEvent } from "../web/ws-handler.js";
 import { computeSignalQuality } from "../engines/signal-quality.js";
 import { getQualityTierWinRates, getDayOfWeekWinRate } from "./execution-log.js";
 import { checkCorrelationRisk } from "../engines/correlation.js";
+import { logDecision } from "./decision-tracker.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
@@ -223,8 +224,14 @@ async function processSignal(tick) {
   const qualityResult = computeSignalQuality(tick, { streakMultiplier: sizing.streakMult ?? 1.0, hourMultiplier, regimeMultiplier });
   const quality = qualityResult.quality;
   const minQuality = getAdaptiveMinQuality();
+  // Gate tracking for decision log
+  const gateResults = { dedup: true, cooldown: true, correlation: true, corrPrice: true, settlement: true, spread: true, regime: true, risk: true, quality: quality >= minQuality };
+  const decisionScores = { quality, minQuality, confidence, edge, regime, betSize, hourMultiplier, dayMultiplier, regimeMultiplier, strength: rec.strength };
+
   if (quality < minQuality) {
     filterStats.quality++;
+    gateResults.quality = false;
+    logDecision({ marketId, question, category, side: rec.side, outcome: "blocked", blockingGate: "quality", gates: gateResults, scores: decisionScores, signalData: tick });
     console.log(`[scanner-trader] SKIP: quality too low (${quality}/${minQuality}) | ${tick.market?.slug || marketId}`);
     return;
   }
@@ -232,6 +239,9 @@ async function processSignal(tick) {
   // Decision context — persisted with every execution for post-hoc analysis
   const latencyMs = Date.now() - signalReceivedAt;
   const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, dayMult: dayMultiplier, sizingMethod: sizing.method, latencyMs };
+
+  // Log successful decision (passed all gates)
+  logDecision({ marketId, question, category, side: rec.side, outcome: DRY_RUN ? "dry_run" : "executed", blockingGate: null, gates: gateResults, scores: decisionScores, signalData: tick });
 
   console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality}/${minQuality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""}${dayMultiplier < 1 ? `*${dayMultiplier}x/day` : ""})`);
 

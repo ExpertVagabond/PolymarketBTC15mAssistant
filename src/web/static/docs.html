@@ -149,6 +149,18 @@
   <div class="section-title">A/B Experiments</div>
   <div id="experimentEndpoints"></div>
 
+  <div class="section-title">Signal Decay</div>
+  <div id="signalDecayEndpoints"></div>
+
+  <div class="section-title">Stress Testing</div>
+  <div id="stressTestEndpoints"></div>
+
+  <div class="section-title">Decision Tracker</div>
+  <div id="decisionEndpoints"></div>
+
+  <div class="section-title">Hedge Engine</div>
+  <div id="hedgeEndpoints"></div>
+
   <div class="section-title">System Health</div>
   <div id="systemHealthEndpoints"></div>
 
@@ -321,6 +333,23 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/experiments/:id", desc: "Detailed experiment stats: per-arm win rates, P&L, Thompson sampling probability of being best" },
     { method: "POST", path: "/api/experiments", desc: "Create experiment. Body: { name, arms: ['control', 'variant_a'] } (auth required)" },
     { method: "POST", path: "/api/experiments/:id/promote", desc: "Manually promote a winner. Body: { arm } (auth required)" }
+  ],
+  signalDecayEndpoints: [
+    { method: "GET", path: "/api/signals/decay-curves", desc: "Signal decay curves by indicator category (fast/medium/slow): half-lives, expected multiplier at various hold durations", tryable: true }
+  ],
+  stressTestEndpoints: [
+    { method: "GET", path: "/api/portfolio/stress-test", desc: "Run stress test on open positions: BTC crash, vol spike, political shock, correlated sell-off scenarios with per-position impact", tryable: true },
+    { method: "GET", path: "/api/portfolio/tail-risk?days=90", desc: "Tail risk metrics: 95th/99th percentile daily loss, max drawdown, daily Sharpe, volatility from historical trades", tryable: true }
+  ],
+  decisionEndpoints: [
+    { method: "GET", path: "/api/trading/decisions?limit=50", desc: "Recent decision log: which gates passed/blocked for each signal, scores, near misses", tryable: true },
+    { method: "GET", path: "/api/trading/near-misses?days=7", desc: "Signals that passed all filters except one — reveals overly tight gates", tryable: true },
+    { method: "GET", path: "/api/trading/filter-cost?days=7", desc: "Filter cost analysis: how many signals each gate blocks, pass rate, blocking percentage by gate", tryable: true }
+  ],
+  hedgeEndpoints: [
+    { method: "GET", path: "/api/portfolio/hedge", desc: "Hedge recommendations: side rebalance, category diversification, directional hedges with priority and sizing", tryable: true },
+    { method: "GET", path: "/api/portfolio/category-exposure", desc: "Category exposure breakdown: per-category position count, USD exposure, YES/NO split, imbalances", tryable: true },
+    { method: "GET", path: "/api/portfolio/beta?days=30", desc: "Portfolio beta by category: how much portfolio P&L co-moves with each category's returns", tryable: true }
   ],
   systemHealthEndpoints: [
     { method: "GET", path: "/api/system/health", desc: "Composite health score (0-100) with per-component breakdown: memory, errors, executions, freshness, database", tryable: true },

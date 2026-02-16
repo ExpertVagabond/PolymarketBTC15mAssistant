@@ -46,6 +46,10 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { getHealthScore, getHealthHistory, getHealthTrend, checkHealthAlerts } from "../maintenance/health-monitor.js";
 import { getRecoveryLog } from "../maintenance/auto-recovery.js";
 import { getEvolutionStatus, evolveParameters, getCurrentBest } from "../engines/param-evolution.js";
+import { getDecayCurves } from "../engines/signal-decay.js";
+import { runStressTest, getTailRisk } from "../portfolio/stress-test.js";
+import { getDecisionHistory, getNearMisses, getFilterCostAnalysis } from "../trading/decision-tracker.js";
+import { getHedgeRecommendations, getCategoryExposure, getPortfolioBeta } from "../portfolio/hedge-engine.js";
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
@@ -785,6 +789,55 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.post("/api/trading/evolution/evolve", { preHandler: requireAuth }, async () => {
     return evolveParameters();
+  });
+
+  /* ── Signal Decay ── */
+
+  app.get("/api/signals/decay-curves", async () => {
+    return getDecayCurves();
+  });
+
+  /* ── Stress Testing ── */
+
+  app.get("/api/portfolio/stress-test", async () => {
+    return runStressTest();
+  });
+
+  app.get("/api/portfolio/tail-risk", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 90, 7), 365);
+    return getTailRisk(days);
+  });
+
+  /* ── Decision Tracker ── */
+
+  app.get("/api/trading/decisions", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getDecisionHistory(limit);
+  });
+
+  app.get("/api/trading/near-misses", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+    return getNearMisses(days);
+  });
+
+  app.get("/api/trading/filter-cost", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+    return getFilterCostAnalysis(days);
+  });
+
+  /* ── Hedge Engine ── */
+
+  app.get("/api/portfolio/hedge", async () => {
+    return getHedgeRecommendations();
+  });
+
+  app.get("/api/portfolio/category-exposure", async () => {
+    return getCategoryExposure();
+  });
+
+  app.get("/api/portfolio/beta", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 180);
+    return getPortfolioBeta(days);
   });
 
   /* ── Trading Status API ── */

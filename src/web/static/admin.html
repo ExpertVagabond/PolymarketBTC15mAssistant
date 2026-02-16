@@ -268,6 +268,30 @@
       <div id="evolutionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Stress Test -->
+    <div class="card">
+      <div class="card-title">Portfolio Stress Test</div>
+      <div id="stressTestBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Decision Tracker -->
+    <div class="card">
+      <div class="card-title">Decision Tracker</div>
+      <div id="decisionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Hedge Recommendations -->
+    <div class="card">
+      <div class="card-title">Hedge Recommendations</div>
+      <div id="hedgeBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Tail Risk -->
+    <div class="card">
+      <div class="card-title">Tail Risk (90d)</div>
+      <div id="tailRiskBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -331,7 +355,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -359,7 +383,11 @@ async function loadAdmin() {
       fetch("/api/trading/execution-quality?days=30").then(r => r.json()).catch(() => null),
       fetch("/api/system/health").then(r => r.json()).catch(() => null),
       fetch("/api/system/recovery-log?limit=10").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/evolution").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/evolution").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/stress-test").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/filter-cost?days=7").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/hedge").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/tail-risk?days=90").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -388,6 +416,10 @@ async function loadAdmin() {
     if (healthScoreData) renderHealthScore(healthScoreData);
     if (recoveryData) renderRecovery(recoveryData);
     if (evolutionData) renderEvolution(evolutionData);
+    if (stressData) renderStressTest(stressData);
+    if (filterCostData) renderDecisionTracker(filterCostData);
+    if (hedgeData) renderHedge(hedgeData);
+    if (tailRiskData) renderTailRisk(tailRiskData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1299,6 +1331,86 @@ function renderEvolution(data) {
   } else {
     html += '<div style="color:#4b5563;font-size:11px;margin-top:6px">Waiting for trade data to evolve</div>';
   }
+
+  el.innerHTML = html;
+}
+
+function renderStressTest(data) {
+  const el = $("stressTestBlock");
+  if (!el) return;
+  if (!data || !data.scenarios || data.scenarios.length === 0) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No open positions to stress test</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Positions</span><span class="v">${data.portfolio.positions}</span></div>`;
+  html += `<div class="kv"><span class="k">Exposure</span><span class="v">$${data.portfolio.totalExposure}</span></div>`;
+
+  if (data.worstCase) {
+    html += `<div class="kv"><span class="k">Worst case</span><span class="v red">${data.worstCase.name}: $${data.worstCase.loss}</span></div>`;
+  }
+
+  for (const s of data.scenarios.slice(0, 3)) {
+    const color = s.totalImpact < -5 ? "red" : s.totalImpact < 0 ? "amber" : "green";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${s.name}</span><span class="v ${color}" style="font-size:10px">$${s.totalImpact} (${s.impactPct}%)</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderDecisionTracker(data) {
+  const el = $("decisionBlock");
+  if (!el) return;
+  if (!data) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No decision data</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Pass rate</span><span class="v ${data.passRate > 10 ? "green" : "amber"}">${data.passRate}%</span></div>`;
+  html += `<div class="kv"><span class="k">Executed / Blocked</span><span class="v">${data.totalExecuted} / ${data.totalBlocked}</span></div>`;
+
+  for (const g of (data.byGate || []).slice(0, 4)) {
+    html += `<div class="kv"><span class="k" style="font-size:10px">${g.gate || "unknown"}</span><span class="v" style="font-size:10px">${g.blocked} (${g.pctOfTotal}%)</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderHedge(data) {
+  const el = $("hedgeBlock");
+  if (!el) return;
+  if (!data || data.recommendations.length === 0) {
+    const msg = data?.riskScore === 0 ? "No hedges needed" : "No open positions";
+    el.innerHTML = `<div style="color:#4b5563;font-size:12px">${msg}</div>`;
+    return;
+  }
+
+  const riskColor = data.riskLevel === "high" ? "red" : data.riskLevel === "medium" ? "amber" : "green";
+  let html = `<div class="kv"><span class="k">Risk score</span><span class="v ${riskColor}">${data.riskScore}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Exposure</span><span class="v">$${data.exposure.total} (${data.exposure.positions} pos)</span></div>`;
+
+  for (const r of data.recommendations.slice(0, 3)) {
+    const prioColor = r.priority === "high" ? "red" : r.priority === "medium" ? "amber" : "";
+    html += `<div style="margin-top:6px;font-size:10px;color:#9ca3af"><span class="v ${prioColor}" style="font-size:9px;text-transform:uppercase">${r.priority}</span> ${r.action}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderTailRisk(data) {
+  const el = $("tailRiskBlock");
+  if (!el) return;
+  if (!data || data.insufficient) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Insufficient data (&lt;5 trading days)</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">95th pctl loss</span><span class="v red">$${data.p95Loss}</span></div>`;
+  html += `<div class="kv"><span class="k">99th pctl loss</span><span class="v red">$${data.p99Loss}</span></div>`;
+  html += `<div class="kv"><span class="k">Max daily loss</span><span class="v red">$${data.maxDailyLoss}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg daily P&L</span><span class="v ${data.avgDailyPnl >= 0 ? "green" : "red"}">$${data.avgDailyPnl}</span></div>`;
+  html += `<div class="kv"><span class="k">Daily Sharpe</span><span class="v">${data.dailySharpe}</span></div>`;
+  html += `<div class="kv"><span class="k">Trading days</span><span class="v">${data.tradingDays}</span></div>`;
 
   el.innerHTML = html;
 }
