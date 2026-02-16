@@ -340,6 +340,30 @@
       <div id="timingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Liquidation Risk -->
+    <div class="card">
+      <div class="card-title">Liquidation Risk</div>
+      <div id="liquidationBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Regime Divergence -->
+    <div class="card">
+      <div class="card-title">Regime Divergence</div>
+      <div id="divergenceBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Liquidity Forecast -->
+    <div class="card">
+      <div class="card-title">Liquidity Forecast</div>
+      <div id="liquidityBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Signal Freshness -->
+    <div class="card">
+      <div class="card-title">Signal Freshness</div>
+      <div id="freshnessBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -403,7 +427,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -443,7 +467,11 @@ async function loadAdmin() {
       fetch("/api/analytics/microstructure").then(r => r.json()).catch(() => null),
       fetch("/api/trading/regime-sizing").then(r => r.json()).catch(() => null),
       fetch("/api/analytics/strategy-compare?days=30").then(r => r.json()).catch(() => null),
-      fetch("/api/analytics/timing/windows?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/analytics/timing/windows?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/liquidation-risk").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/regime-divergence?days=14").then(r => r.json()).catch(() => null),
+      fetch("/api/scanner/liquidity-forecast").then(r => r.json()).catch(() => null),
+      fetch("/api/signals/freshness-profile").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -484,6 +512,10 @@ async function loadAdmin() {
     if (regimeSizingData) renderRegimeSizing(regimeSizingData);
     if (replayData) renderReplay(replayData);
     if (timingData) renderTiming(timingData);
+    if (liquidationData) renderLiquidation(liquidationData);
+    if (divergenceData) renderDivergence(divergenceData);
+    if (liquidityData) renderLiquidity(liquidityData);
+    if (freshnessData) renderFreshness(freshnessData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1674,6 +1706,99 @@ function renderTiming(data) {
 
   if ((data.hot || []).length === 0 && (data.cold || []).length === 0) {
     html += '<div style="color:#4b5563;font-size:11px;margin-top:6px">No significant timing patterns detected</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function renderLiquidation(data) {
+  const el = $("liquidationBlock");
+  if (!el) return;
+  if (!data || !data.currentRisk) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No risk data</div>';
+    return;
+  }
+
+  const r = data.currentRisk;
+  const usedColor = r.pctUsed > 75 ? "red" : r.pctUsed > 50 ? "amber" : "green";
+  let html = `<div class="kv"><span class="k">Daily P&L</span><span class="v ${r.dailyPnl >= 0 ? "green" : "red"}">$${r.dailyPnl} / -$${r.dailyLimit}</span></div>`;
+  html += `<div class="kv"><span class="k">Budget used</span><span class="v ${usedColor}">${r.pctUsed}%</span></div>`;
+
+  for (const h of (data.horizons || [])) {
+    if (h.insufficientData) continue;
+    const pColor = h.breachProbability > 25 ? "red" : h.breachProbability > 10 ? "amber" : "green";
+    html += `<div class="kv"><span class="k">${h.hours}h breach</span><span class="v ${pColor}">${h.breachProbability}%</span></div>`;
+  }
+
+  for (const rec of (data.recommendations || []).slice(0, 2)) {
+    html += `<div style="font-size:10px;color:#fbbf24;margin-top:4px">${esc(rec)}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderDivergence(data) {
+  const el = $("divergenceBlock");
+  if (!el) return;
+  if (!data || data.insufficient) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Insufficient data</div>';
+    return;
+  }
+
+  const alColor = data.overallAlignment >= 70 ? "green" : data.overallAlignment >= 40 ? "amber" : "red";
+  let html = `<div class="kv"><span class="k">Current regime</span><span class="v blue">${data.currentRegime}</span></div>`;
+  html += `<div class="kv"><span class="k">Alignment</span><span class="v ${alColor}">${data.overallAlignment}% (${data.alignedCategories}/${data.totalCategories})</span></div>`;
+
+  for (const d of (data.divergences || []).slice(0, 4)) {
+    const dColor = d.direction === "outperforming" ? "green" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(d.category)}</span><span class="v ${dColor}" style="font-size:10px">${d.winRate}% (${d.deviation > 0 ? "+" : ""}${d.deviation})</span></div>`;
+  }
+
+  if ((data.divergences || []).length === 0) {
+    html += '<div style="font-size:11px;color:#34d399;margin-top:4px">All categories aligned</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function renderLiquidity(data) {
+  const el = $("liquidityBlock");
+  if (!el) return;
+  if (!data || !data.totalMarkets) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No liquidity data</div>';
+    return;
+  }
+
+  const qColor = data.overallQuality === "healthy" ? "green" : data.overallQuality === "fair" ? "amber" : "red";
+  let html = `<div class="kv"><span class="k">Markets</span><span class="v">${data.totalMarkets}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg score</span><span class="v ${qColor}">${data.avgLiquidityScore}/100</span></div>`;
+  html += `<div class="kv"><span class="k">High / Med / Low</span><span class="v">${data.highLiquidity} / ${data.mediumLiquidity} / ${data.lowLiquidity}</span></div>`;
+
+  if (data.atRisk?.length > 0) {
+    html += `<div class="kv"><span class="k">At risk</span><span class="v red">${data.atRisk.length} markets</span></div>`;
+  }
+
+  if (data.recommendation) {
+    html += `<div style="font-size:10px;color:#9ca3af;margin-top:4px">${esc(data.recommendation)}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderFreshness(data) {
+  const el = $("freshnessBlock");
+  if (!el) return;
+  if (!data || !data.categories) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No freshness data</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Cutoff</span><span class="v">${data.freshnessCutoff} (${data.freshnessCutoff * 100}%)</span></div>`;
+  html += `<div class="kv"><span class="k">Regime penalty</span><span class="v amber">${data.regimeChangePenalty}</span></div>`;
+
+  html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">HALF-LIVES</div>';
+  for (const c of data.categories.slice(0, 8)) {
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(c.category)}</span><span class="v" style="font-size:10px">${c.halfLife}min (stale@${c.staleAt}min)</span></div>`;
   }
 
   el.innerHTML = html;

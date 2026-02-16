@@ -191,6 +191,18 @@
   <div class="section-title">Execution Timing</div>
   <div id="timingEndpoints"></div>
 
+  <div class="section-title">Liquidation Risk</div>
+  <div id="liquidationEndpoints"></div>
+
+  <div class="section-title">Regime Correlations</div>
+  <div id="regimeCorrelationEndpoints"></div>
+
+  <div class="section-title">Liquidity Predictor</div>
+  <div id="liquidityEndpoints"></div>
+
+  <div class="section-title">Signal Freshness</div>
+  <div id="freshnessEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -420,6 +432,22 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/analytics/timing?days=30", desc: "Full timing analysis: hourly, daily, and regime×hour win rate breakdowns with baseline comparison", tryable: true },
     { method: "GET", path: "/api/analytics/timing/windows?days=30", desc: "Optimal trading windows: hot (high win rate) and cold (low win rate) time slots with statistical significance", tryable: true },
     { method: "GET", path: "/api/analytics/timing/recommendation?hour=14&dow=3&regime=RANGE", desc: "Real-time timing recommendation: trade/aggressive/cautious/avoid based on current hour, day, and regime", tryable: true }
+  ],
+  liquidationEndpoints: [
+    { method: "GET", path: "/api/portfolio/liquidation-risk", desc: "Monte Carlo liquidation risk forecast: 500 simulated paths computing breach probability at 4h/8h/24h horizons with position trim recommendations", tryable: true },
+    { method: "GET", path: "/api/portfolio/breach-probability?hours=4", desc: "Quick breach probability for a single time horizon", tryable: true }
+  ],
+  regimeCorrelationEndpoints: [
+    { method: "GET", path: "/api/analytics/regime-correlations?days=30", desc: "Cross-category regime correlations: pairwise Pearson correlation of win rates across regimes, divergence detection", tryable: true },
+    { method: "GET", path: "/api/analytics/regime-divergence?days=14", desc: "Regime divergence alerts: categories behaving opposite to regime expectations with severity and deviation scores", tryable: true },
+    { method: "GET", path: "/api/analytics/category-regime-map?days=30", desc: "Category regime map: best-performing regime per category with win rate breakdown", tryable: true }
+  ],
+  liquidityEndpoints: [
+    { method: "GET", path: "/api/scanner/liquidity-rankings", desc: "Market liquidity rankings: predicted tradability scores based on volume, spread, depth, category, settlement proximity", tryable: true },
+    { method: "GET", path: "/api/scanner/liquidity-forecast", desc: "Liquidity forecast with at-risk markets and trading opportunities identified by predicted future liquidity", tryable: true }
+  ],
+  freshnessEndpoints: [
+    { method: "GET", path: "/api/signals/freshness-profile", desc: "Signal freshness profile: category-specific half-lives, regime decay multipliers, decay curves, and staleness thresholds", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

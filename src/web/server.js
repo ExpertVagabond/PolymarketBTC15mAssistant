@@ -58,6 +58,10 @@ import { getMicrostructureStats, isTradeable } from "../engines/microstructure.j
 import { getRegimeSizingMultiplier, getSizingProfile } from "../engines/regime-sizing.js";
 import { replaySignals, compareStrategies as compareReplayStrategies } from "../engines/signal-replay.js";
 import { getTimingAnalysis, getOptimalWindows, getTimingRecommendation } from "../engines/time-optimizer.js";
+import { forecastLiquidationRisk, getBreachProbability } from "../portfolio/liquidation-forecaster.js";
+import { getRegimeCorrelations, detectRegimeDivergence, getCategoryRegimeMap } from "../engines/regime-correlation.js";
+import { getLiquidityRankings, getLiquidityForecast } from "../scanner/liquidity-predictor.js";
+import { computeFreshness, getFreshnessProfile } from "../engines/signal-freshness.js";
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
@@ -960,6 +964,50 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     const dow = Number(req.query.dow ?? new Date().getUTCDay());
     const regime = req.query.regime || "RANGE";
     return getTimingRecommendation(hour, dow, regime);
+  });
+
+  /* ── Liquidation Risk ── */
+
+  app.get("/api/portfolio/liquidation-risk", async () => {
+    return forecastLiquidationRisk();
+  });
+
+  app.get("/api/portfolio/breach-probability", async (req) => {
+    const hours = Math.min(Math.max(Number(req.query.hours) || 4, 1), 48);
+    return getBreachProbability(hours);
+  });
+
+  /* ── Regime Correlations ── */
+
+  app.get("/api/analytics/regime-correlations", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getRegimeCorrelations(days);
+  });
+
+  app.get("/api/analytics/regime-divergence", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 90);
+    return detectRegimeDivergence(days);
+  });
+
+  app.get("/api/analytics/category-regime-map", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getCategoryRegimeMap(days);
+  });
+
+  /* ── Liquidity Predictor ── */
+
+  app.get("/api/scanner/liquidity-rankings", async () => {
+    return getLiquidityRankings();
+  });
+
+  app.get("/api/scanner/liquidity-forecast", async () => {
+    return getLiquidityForecast();
+  });
+
+  /* ── Signal Freshness ── */
+
+  app.get("/api/signals/freshness-profile", async () => {
+    return getFreshnessProfile();
   });
 
   /* ── Trading Status API ── */
