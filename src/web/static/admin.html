@@ -436,6 +436,30 @@
       <div id="impactBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Position Lifecycle (Tier 37) -->
+    <div class="card">
+      <div class="card-title">Position Lifecycle</div>
+      <div id="lifecycleBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Monte Carlo (Tier 37) -->
+    <div class="card">
+      <div class="card-title">Monte Carlo Backtest</div>
+      <div id="monteCarloBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Alert Fatigue (Tier 37) -->
+    <div class="card">
+      <div class="card-title">Alert Fatigue</div>
+      <div id="fatigueBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Strategy Selector (Tier 37) -->
+    <div class="card">
+      <div class="card-title">Strategy Selector</div>
+      <div id="strategySelectorBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -499,7 +523,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -555,7 +579,11 @@ async function loadAdmin() {
       fetch("/api/trading/algorithm-performance?days=14").then(r => r.json()).catch(() => null),
       fetch("/api/trading/breaker-status").then(r => r.json()).catch(() => null),
       fetch("/api/engines/kalman-fusion").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/impact-calibration?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/impact-calibration?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/lifecycles").then(r => r.json()).catch(() => null),
+      fetch("/api/backtest/monte-carlo?days=30&paths=500").then(r => r.json()).catch(() => null),
+      fetch("/api/notifications/fatigue-status").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/strategy-allocation").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -612,6 +640,10 @@ async function loadAdmin() {
     if (breakerData) renderBreaker(breakerData);
     if (kalmanData) renderKalman(kalmanData);
     if (impactData) renderImpact(impactData);
+    if (lifecycleData) renderLifecycle(lifecycleData);
+    if (monteCarloData) renderMonteCarlo(monteCarloData);
+    if (fatigueData) renderFatigue(fatigueData);
+    if (strategyData) renderStrategySelector(strategyData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2175,6 +2207,92 @@ function renderImpact(data) {
     html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY REGIME</div>';
     for (const [r, d] of Object.entries(data.calibration.byRegime).slice(0, 4)) {
       html += `<div class="kv"><span class="k" style="font-size:10px">${esc(r)}</span><span class="v" style="font-size:10px">${d.avgSlippageBps}±${d.stdSlippageBps} bps (${d.sampleSize})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderLifecycle(data) {
+  const el = $("lifecycleBlock");
+  if (!el || !data) return;
+  const s = data.summary || {};
+  let html = `<div class="kv"><span class="k">Total Tracked</span><span class="v">${s.totalTracked || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Active</span><span class="v">${s.activeCount || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Timed Out</span><span class="v">${s.timedOutCancelled || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Realized P&L</span><span class="v">${s.totalRealizedPnl || 0}</span></div>`;
+  if (s.byState) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY STATE</div>';
+    for (const [st, ct] of Object.entries(s.byState)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(st)}</span><span class="v" style="font-size:10px">${ct}</span></div>`;
+    }
+  }
+  const active = (data.active || []).slice(0, 5);
+  if (active.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">ACTIVE POSITIONS</div>';
+    for (const p of active) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(p.id?.slice(0,12))}</span><span class="v" style="font-size:10px">${p.state} ${p.side} ${p.currentShares}sh ${p.ageMinutes}m</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderMonteCarlo(data) {
+  const el = $("monteCarloBlock");
+  if (!el || !data) return;
+  if (data.message === "insufficient_data") { el.innerHTML = '<div style="color:#9ca3af;font-size:11px">Insufficient data</div>'; return; }
+  const sim = data.simulation || {};
+  const pct = data.percentiles || {};
+  const risk = data.riskMetrics || {};
+  let html = `<div class="kv"><span class="k">Paths</span><span class="v">${sim.paths || 0} × ${sim.tradesPerPath || 0} trades</span></div>`;
+  if (pct.totalPnl) {
+    html += `<div class="kv"><span class="k">P&L p5/p50/p95</span><span class="v">${pct.totalPnl.p5} / ${pct.totalPnl.p50} / ${pct.totalPnl.p95}</span></div>`;
+  }
+  if (pct.sharpe) {
+    html += `<div class="kv"><span class="k">Sharpe p5/p50/p95</span><span class="v">${pct.sharpe.p5} / ${pct.sharpe.p50} / ${pct.sharpe.p95}</span></div>`;
+  }
+  if (pct.maxDrawdown) {
+    html += `<div class="kv"><span class="k">MaxDD p50/p95</span><span class="v">${pct.maxDrawdown.p50} / ${pct.maxDrawdown.p95}</span></div>`;
+  }
+  html += `<div class="kv"><span class="k">Prob of Loss</span><span class="v">${((risk.probOfLoss || 0) * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Worst/Best Case</span><span class="v">${risk.expectedWorstCase || 0} / ${risk.expectedBestCase || 0}</span></div>`;
+  el.innerHTML = html;
+}
+
+function renderFatigue(data) {
+  const el = $("fatigueBlock");
+  if (!el || !data) return;
+  const stats = data.stats || {};
+  let html = `<div class="kv"><span class="k">Health</span><span class="v" style="color:${stats.overallHealth === 'healthy' ? '#22c55e' : stats.overallHealth === 'busy' ? '#f59e0b' : '#ef4444'}">${stats.overallHealth || 'unknown'}</span></div>`;
+  html += `<div class="kv"><span class="k">Sent / Suppressed</span><span class="v">${stats.totalSentThisHour || 0} / ${stats.totalSuppressed || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Suppression Rate</span><span class="v">${((stats.suppressionRate || 0) * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Coalesced</span><span class="v">${stats.totalCoalesced || 0}</span></div>`;
+  if (data.channels) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">CHANNELS</div>';
+    for (const [ch, info] of Object.entries(data.channels)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(ch)}</span><span class="v" style="font-size:10px">${info.sentThisHour}/${info.limit} (${(info.utilization * 100).toFixed(0)}%)</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderStrategySelector(data) {
+  const el = $("strategySelectorBlock");
+  if (!el || !data) return;
+  if (data.message === "insufficient_data") { el.innerHTML = '<div style="color:#9ca3af;font-size:11px">Insufficient data</div>'; return; }
+  let html = `<div class="kv"><span class="k">Regime</span><span class="v">${esc(data.currentRegime || 'RANGE')}</span></div>`;
+  html += `<div class="kv"><span class="k">Total Trades</span><span class="v">${data.totalTrades || 0}</span></div>`;
+  const rec = data.recommended || [];
+  if (rec.length > 0) {
+    html += `<div class="kv"><span class="k">Recommended</span><span class="v" style="color:#22c55e">${rec.map(esc).join(', ')}</span></div>`;
+  }
+  const benched = data.benched || [];
+  if (benched.length > 0) {
+    html += `<div class="kv"><span class="k">Benched</span><span class="v" style="color:#ef4444">${benched.map(esc).join(', ')}</span></div>`;
+  }
+  if (data.allocation) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">ALLOCATION</div>';
+    for (const [strat, pct] of Object.entries(data.allocation).slice(0, 5)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(strat)}</span><span class="v" style="font-size:10px">${(pct * 100).toFixed(1)}%</span></div>`;
     }
   }
   el.innerHTML = html;

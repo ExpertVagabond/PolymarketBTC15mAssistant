@@ -89,6 +89,10 @@ import { recommendStrategy, getAlgorithmPerformance } from "../trading/order-alg
 import { evaluateBreaker, getBreakerStatus, resetBreaker } from "../trading/predictive-breaker.js";
 import { getFusionOverview, getFilterDiagnostics } from "../engines/kalman-fusion.js";
 import { getImpactCurves, calibrateImpactModel } from "../trading/market-impact.js";
+import { createPosition, transitionPosition, getPositionState, getActiveLifecycles, getPositionEvents } from "../trading/position-lifecycle.js";
+import { runMonteCarloSimulation, parameterSensitivity, regimeMonteCarlo } from "../backtest/monte-carlo.js";
+import { evaluateAlert, flushCoalesced, getFatigueStatus, resetFatigue } from "../notifications/fatigue-manager.js";
+import { getStrategyAllocation, detectLeadLag, getRotationRecommendations } from "../engines/strategy-selector.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1184,6 +1188,69 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/trading/impact-calibration", async (req) => {
     const days = Math.min(Number(req.query.days) || 30, 180);
     return calibrateImpactModel(days);
+  });
+
+  /* ── Tier 37: Lifecycle, Monte Carlo, Fatigue, Strategy ── */
+
+  app.get("/api/trading/lifecycles", async () => {
+    return getActiveLifecycles();
+  });
+
+  app.get("/api/trading/lifecycle/:id", async (req) => {
+    return getPositionState(req.params.id) || { error: "not_found" };
+  });
+
+  app.get("/api/trading/lifecycle/:id/events", async (req) => {
+    return getPositionEvents(req.params.id) || { error: "not_found" };
+  });
+
+  app.get("/api/backtest/monte-carlo", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    const paths = Math.min(Number(req.query.paths) || 1000, 5000);
+    return runMonteCarloSimulation(days, { paths });
+  });
+
+  app.get("/api/backtest/parameter-sensitivity", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return parameterSensitivity(days);
+  });
+
+  app.get("/api/backtest/regime-monte-carlo", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return regimeMonteCarlo(days);
+  });
+
+  app.get("/api/notifications/fatigue-status", async () => {
+    return getFatigueStatus();
+  });
+
+  app.post("/api/notifications/fatigue-flush", { preHandler: requireAuth }, async (req) => {
+    const channel = req.body?.channel;
+    if (!channel) return { error: "channel_required" };
+    return flushCoalesced(channel);
+  });
+
+  app.post("/api/notifications/fatigue-reset", { preHandler: requireAuth }, async (req) => {
+    return resetFatigue(req.body?.channel);
+  });
+
+  app.get("/api/engines/strategy-allocation", async (req) => {
+    return getStrategyAllocation({
+      currentRegime: req.query.regime || "RANGE",
+      days: Math.min(Number(req.query.days) || 30, 180)
+    });
+  });
+
+  app.get("/api/engines/lead-lag", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return detectLeadLag(days);
+  });
+
+  app.get("/api/engines/rotation-recommendations", async (req) => {
+    return getRotationRecommendations({
+      currentRegime: req.query.regime || "RANGE",
+      forecastRegime: req.query.forecast || req.query.regime || "RANGE"
+    });
   });
 
   /* ── Trading Status API ── */

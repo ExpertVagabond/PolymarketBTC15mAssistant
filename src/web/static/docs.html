@@ -239,6 +239,18 @@
   <div class="section-title">Market Impact Model</div>
   <div id="impactEndpoints"></div>
 
+  <div class="section-title">Position Lifecycle</div>
+  <div id="lifecycleEndpoints"></div>
+
+  <div class="section-title">Monte Carlo Backtest</div>
+  <div id="monteCarloEndpoints"></div>
+
+  <div class="section-title">Alert Fatigue Manager</div>
+  <div id="fatigueEndpoints"></div>
+
+  <div class="section-title">Strategy Selector</div>
+  <div id="strategySelectorEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -537,6 +549,26 @@ const ENDPOINTS = {
   impactEndpoints: [
     { method: "GET", path: "/api/trading/impact-curves?marketId=abc&regime=RANGE", desc: "Market impact curves: linear and square-root impact models at 7 order sizes (1-100 shares) with cost-per-share and optimal range identification", tryable: true },
     { method: "GET", path: "/api/trading/impact-calibration?days=30", desc: "Impact model calibration: empirical slippage by regime and category from historical executions with P95 and max values", tryable: true }
+  ],
+  lifecycleEndpoints: [
+    { method: "GET", path: "/api/trading/lifecycles", desc: "Active position lifecycles: FSM states (PENDING/ENTERED/SCALING/HEDGED/PARTIAL_EXIT/CLOSED), auto-cancel timed-out PENDING positions, by-state summary with realized P&L", tryable: true },
+    { method: "GET", path: "/api/trading/lifecycle/:id", desc: "Single position state: current FSM state, allowed transitions, shares, avg price, scale count, hedge ID, age, timeout status", tryable: false },
+    { method: "GET", path: "/api/trading/lifecycle/:id/events", desc: "Position event audit trail: full transition history with timestamps, reasons, share/price changes per event", tryable: false }
+  ],
+  monteCarloEndpoints: [
+    { method: "GET", path: "/api/backtest/monte-carlo?days=30&paths=1000", desc: "Monte Carlo simulation: bootstrap-resampled P&L paths with percentiles (p5/p25/p50/p75/p95) for total P&L, max drawdown, Sharpe, and win rate. Risk metrics include probability of loss and worst/best case", tryable: true },
+    { method: "GET", path: "/api/backtest/parameter-sensitivity?days=30", desc: "Parameter sensitivity: grid search over 7 confidence × 6 edge thresholds showing trades, pass rate, win rate, avg P&L, Sharpe proxy. Identifies optimal parameter combination", tryable: true },
+    { method: "GET", path: "/api/backtest/regime-monte-carlo?days=30", desc: "Regime-conditional Monte Carlo: 500 bootstrap paths per regime comparing median P&L, confidence intervals, probability of loss, and win rate across market regimes", tryable: true }
+  ],
+  fatigueEndpoints: [
+    { method: "GET", path: "/api/notifications/fatigue-status", desc: "Alert fatigue status: per-channel utilization (sent/limit), suppression rate, coalesced buffer sizes, top fatigued users with scores, overall health (healthy/busy/overloaded)", tryable: true },
+    { method: "POST", path: "/api/notifications/fatigue-flush", desc: "Flush coalesced alerts for a channel into a single digest message (requires auth, body: {channel})" },
+    { method: "POST", path: "/api/notifications/fatigue-reset", desc: "Reset fatigue counters for a channel or all channels (requires auth, body: {channel?})" }
+  ],
+  strategySelectorEndpoints: [
+    { method: "GET", path: "/api/engines/strategy-allocation?regime=RANGE&days=30", desc: "Strategy allocation: regime×strategy performance matrix, ranked by Sharpe proxy, inverse-risk-weighted allocation percentages, recommended and benched strategies", tryable: true },
+    { method: "GET", path: "/api/engines/lead-lag?days=14", desc: "Cross-category lead-lag detection: hourly win-rate time series correlations between category pairs, identifies leader/follower relationships with strength ratings", tryable: true },
+    { method: "GET", path: "/api/engines/rotation-recommendations?regime=RANGE&forecast=TREND", desc: "Strategy rotation recommendations: compares current vs forecast regime allocations, identifies strategy adjustments needed with increase/decrease actions and urgency level", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
