@@ -146,6 +146,9 @@
   <div class="section-title">Observability — Error Logs</div>
   <div id="logsEndpoints"></div>
 
+  <div class="section-title">A/B Experiments</div>
+  <div id="experimentEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -238,7 +241,9 @@ const ENDPOINTS = {
     { method: "POST", path: "/api/admin/webhook-queue/purge?days=7", desc: "Purge old delivered/failed queue entries" }
   ],
   portfolioIntelEndpoints: [
-    { method: "GET", path: "/api/portfolio/risk", desc: "Portfolio risk attribution: concentration (HHI), side exposure, max single position, drawdown attribution", tryable: true }
+    { method: "GET", path: "/api/portfolio/risk", desc: "Portfolio risk attribution: concentration (HHI), side exposure, max single position, drawdown attribution", tryable: true },
+    { method: "GET", path: "/api/portfolio/correlation-matrix?days=30", desc: "Cross-market correlation matrix: pairwise Pearson correlations, clusters, diversity score, correlated pairs", tryable: true },
+    { method: "GET", path: "/api/portfolio/open-correlations", desc: "Correlation analysis for currently open positions: correlated pairs, risk level", tryable: true }
   ],
   deliveryEndpoints: [
     { method: "GET", path: "/api/notifications/delivery-audit", desc: "Per-user notification delivery audit log (auth required)" },
@@ -292,7 +297,8 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/trading/regime-history", desc: "Regime transition tracker: current regime distribution and per-market transition history with stability", tryable: true },
     { method: "GET", path: "/api/trading/category-weights", desc: "Per-category learned indicator weights, global model version, combo multipliers, and category tuning parameters", tryable: true },
     { method: "GET", path: "/api/trading/slippage?days=30", desc: "Slippage analysis: overall avg, breakdown by size bucket, category, and hour-of-day", tryable: true },
-    { method: "GET", path: "/api/trading/anomalies", desc: "Rolling performance anomaly detection: compares recent 20 trades vs 100-trade baseline for win rate, Sharpe, P&L degradation", tryable: true }
+    { method: "GET", path: "/api/trading/anomalies", desc: "Rolling performance anomaly detection: compares recent 20 trades vs 100-trade baseline for win rate, Sharpe, P&L degradation", tryable: true },
+    { method: "GET", path: "/api/trading/execution-quality?days=30", desc: "Execution quality metrics: latency stats (avg/p50/p95/p99), fill rates, quality score (0-100), breakdown by hour and size", tryable: true }
   ],
   perfMaintenanceEndpoints: [
     { method: "GET", path: "/api/admin/perf", desc: "Per-route response times, error rates, slow request log", tryable: true },
@@ -303,6 +309,12 @@ const ENDPOINTS = {
   logsEndpoints: [
     { method: "GET", path: "/api/logs?source=binance&days=7", desc: "Query structured error logs with filters", tryable: true },
     { method: "GET", path: "/api/logs/trends?days=7", desc: "Error trends by source and level", tryable: true }
+  ],
+  experimentEndpoints: [
+    { method: "GET", path: "/api/experiments", desc: "List all A/B experiments with status, sample count, and winner", tryable: true },
+    { method: "GET", path: "/api/experiments/:id", desc: "Detailed experiment stats: per-arm win rates, P&L, Thompson sampling probability of being best" },
+    { method: "POST", path: "/api/experiments", desc: "Create experiment. Body: { name, arms: ['control', 'variant_a'] } (auth required)" },
+    { method: "POST", path: "/api/experiments/:id/promote", desc: "Manually promote a winner. Body: { arm } (auth required)" }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

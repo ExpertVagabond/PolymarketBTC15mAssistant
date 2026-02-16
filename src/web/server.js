@@ -46,12 +46,14 @@ import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
-import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates, getQualityDistribution, exportExecutions, getDailySummary, getPerformanceAttribution, getConfidenceCalibration, getSlippageAnalysis } from "../trading/execution-log.js";
+import { getRecentExecutions, getExecutionStats, getOpenExecutions, getExecutionById, cancelExecution, cancelAllOpenExecutions, getTradeAnalytics, getHourlyWinRates, getQualityDistribution, exportExecutions, getDailySummary, getPerformanceAttribution, getConfidenceCalibration, getSlippageAnalysis, getExecutionQuality } from "../trading/execution-log.js";
 import { isTradingConfigured } from "../trading/clob-auth.js";
 import { setBotState, getBotControlState } from "../trading/bot-control.js";
 import { attachScannerTrader, getScannerTraderStats, getFilterStats } from "../trading/scanner-trader.js";
 import { getRegimeTransitions, getRegimeDistribution } from "../engines/regime.js";
 import { detectAnomalies } from "../engines/anomaly-detector.js";
+import { computeCorrelationMatrix, getOpenPositionCorrelations } from "../engines/correlation.js";
+import { listExperiments, getExperimentStats, createExperiment, promoteWinner } from "../engines/ab-experiments.js";
 import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositions, autoRepairStalePositions } from "../trading/audit-log.js";
 import { getWalletBalance } from "../trading/wallet.js";
 import { getRealtimePnl } from "../trading/pnl-tracker.js";
@@ -843,6 +845,40 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/trading/anomalies", async () => {
     return detectAnomalies();
+  });
+
+  app.get("/api/trading/execution-quality", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getExecutionQuality(days);
+  });
+
+  app.get("/api/portfolio/correlation-matrix", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return computeCorrelationMatrix(days);
+  });
+
+  app.get("/api/portfolio/open-correlations", async () => {
+    return getOpenPositionCorrelations();
+  });
+
+  app.get("/api/experiments", async () => {
+    return listExperiments();
+  });
+
+  app.get("/api/experiments/:id", async (req) => {
+    return getExperimentStats(Number(req.params.id));
+  });
+
+  app.post("/api/experiments", { preHandler: requireAuth }, async (req) => {
+    const { name, arms } = req.body || {};
+    if (!name || !arms) return { error: "provide name and arms array" };
+    return createExperiment(name, arms);
+  });
+
+  app.post("/api/experiments/:id/promote", { preHandler: requireAuth }, async (req) => {
+    const { arm } = req.body || {};
+    if (!arm) return { error: "provide arm name" };
+    return promoteWinner(Number(req.params.id), arm);
   });
 
   app.get("/api/trading/daily-summary", async (req) => {

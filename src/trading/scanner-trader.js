@@ -18,6 +18,7 @@ import { getConfigValue } from "./trading-config.js";
 import { broadcastTradeEvent } from "../web/ws-handler.js";
 import { computeSignalQuality } from "../engines/signal-quality.js";
 import { getQualityTierWinRates, getDayOfWeekWinRate } from "./execution-log.js";
+import { checkCorrelationRisk } from "../engines/correlation.js";
 
 const ENABLED = (process.env.ENABLE_TRADING || "false").toLowerCase() === "true";
 const DRY_RUN = (process.env.TRADING_DRY_RUN || "true").toLowerCase() !== "false";
@@ -25,7 +26,7 @@ const MIN_STRENGTH = new Set(["STRONG", "GOOD"]);
 
 let signalCount = 0;
 let tradeCount = 0;
-const filterStats = { dedup: 0, cooldown: 0, correlated: 0, settlement: 0, spread: 0, chop: 0, risk: 0, quality: 0 };
+const filterStats = { dedup: 0, cooldown: 0, correlated: 0, corrPrice: 0, settlement: 0, spread: 0, chop: 0, risk: 0, quality: 0 };
 
 // Adaptive quality gate
 const DEFAULT_MIN_QUALITY = 30;
@@ -132,6 +133,18 @@ async function processSignal(tick) {
     return;
   }
 
+  // Price-based correlation guard: skip if highly correlated with open positions
+  try {
+    const corrCheck2 = checkCorrelationRisk(marketId, 0.7);
+    if (corrCheck2.blocked) {
+      filterStats.corrPrice++;
+      console.log(`[scanner-trader] SKIP: price correlation r=${corrCheck2.highestCorrelation} with ${corrCheck2.correlatedWith} | ${tick.market?.slug || marketId}`);
+      return;
+    }
+  } catch {
+    // Continue if correlation check fails (insufficient data)
+  }
+
   // Settlement time filter: skip markets settling too soon
   const settlementLeftMin = tick.settlementLeftMin ?? tick.market?.settlementLeftMin ?? null;
   const minSettlementMin = getConfigValue("min_settlement_minutes");
@@ -191,6 +204,9 @@ async function processSignal(tick) {
     return;
   }
 
+  // Track signal processing latency
+  const signalReceivedAt = Date.now();
+
   const edge = rec.side === "UP" ? tick.edge?.edgeUp : tick.edge?.edgeDown;
   const sizing = getKellyBetSize(tick);
   const recoveryMult = getRecoveryMultiplier();
@@ -214,7 +230,8 @@ async function processSignal(tick) {
   }
 
   // Decision context — persisted with every execution for post-hoc analysis
-  const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, dayMult: dayMultiplier, sizingMethod: sizing.method };
+  const latencyMs = Date.now() - signalReceivedAt;
+  const decisionCtx = { quality, regime, streakMult: sizing.streakMult ?? 1.0, hourMult: hourMultiplier, dayMult: dayMultiplier, sizingMethod: sizing.method, latencyMs };
 
   console.log(`[scanner-trader] SIGNAL: ${tick.signal} | ${rec.strength} | Q:${quality}/${minQuality} | ${question?.slice(0, 50)} | Edge: ${((edge ?? 0) * 100).toFixed(1)}% | Bet: $${betSize.toFixed(2)} (${sizing.method}${sizing.sizingTier ? `/${sizing.sizingTier}` : ""}${regimeMultiplier < 1 ? `*${regimeMultiplier}x/${regime}` : ""}${dayMultiplier < 1 ? `*${dayMultiplier}x/day` : ""})`);
 

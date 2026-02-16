@@ -232,6 +232,24 @@
       <div id="slippageBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Correlation Matrix -->
+    <div class="card">
+      <div class="card-title">Portfolio Correlation</div>
+      <div id="correlationBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- A/B Experiments -->
+    <div class="card">
+      <div class="card-title">A/B Experiments</div>
+      <div id="experimentsBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Execution Quality -->
+    <div class="card">
+      <div class="card-title">Execution Quality</div>
+      <div id="execQualityBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -295,7 +313,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -317,7 +335,10 @@ async function loadAdmin() {
       fetch("/api/trading/category-weights").then(r => r.json()).catch(() => null),
       fetch("/api/signals/regime-analytics?days=30").then(r => r.json()).catch(() => null),
       fetch("/api/trading/anomalies").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/slippage?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/slippage?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/open-correlations").then(r => r.json()).catch(() => null),
+      fetch("/api/experiments").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/execution-quality?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -340,6 +361,9 @@ async function loadAdmin() {
     if (regimeAnalytics) renderHeatmap(regimeAnalytics);
     if (anomalyData) renderAnomalies(anomalyData);
     if (slippageData) renderSlippage(slippageData);
+    if (correlationData) renderCorrelation(correlationData);
+    if (experimentsData) renderExperiments(experimentsData);
+    if (execQualityData) renderExecQuality(execQualityData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1106,6 +1130,75 @@ function renderSlippage(data) {
     for (const s of data.bySize) {
       html += `<div class="kv"><span class="k" style="font-size:10px">${esc(s.size_bucket)}</span><span class="v" style="font-size:10px">${s.avg_slippage ?? "-"} (${s.trades}t)</span></div>`;
     }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderCorrelation(data) {
+  const el = $("correlationBlock");
+  if (!el) return;
+  if (!data || data.positions < 2) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Need 2+ open positions for correlation analysis</div>';
+    return;
+  }
+
+  const riskColors = { low: "green", medium: "amber", high: "red" };
+  let html = `<div class="kv"><span class="k">Open positions</span><span class="v">${data.positions}</span></div>`;
+  html += `<div class="kv"><span class="k">Risk level</span><span class="v ${riskColors[data.riskLevel] || ""}">${(data.riskLevel || "low").toUpperCase()}</span></div>`;
+
+  if (data.correlatedPairs?.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:8px;margin-bottom:4px">CORRELATED PAIRS</div>';
+    for (const p of data.correlatedPairs.slice(0, 5)) {
+      const color = p.correlation >= 0.7 ? "red" : "amber";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(p.marketA.slice(0, 20))}</span><span class="v ${color}" style="font-size:10px">r=${p.correlation.toFixed(2)}</span></div>`;
+    }
+  } else {
+    html += '<div style="color:#34d399;font-size:11px;margin-top:6px">No high correlations detected</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function renderExperiments(data) {
+  const el = $("experimentsBlock");
+  if (!el) return;
+  if (!Array.isArray(data) || data.length === 0) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No experiments yet</div>';
+    return;
+  }
+
+  let html = "";
+  for (const exp of data.slice(0, 5)) {
+    const statusColors = { active: "green", completed: "blue", paused: "amber" };
+    const badge = `<span class="v ${statusColors[exp.status] || ""}" style="font-size:10px">${exp.status.toUpperCase()}</span>`;
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(exp.name)}</span>${badge}</div>`;
+    html += `<div class="kv"><span class="k" style="font-size:10px;padding-left:8px">Samples / Arms</span><span class="v" style="font-size:10px">${exp.totalSamples} / ${exp.armCount}</span></div>`;
+    if (exp.winner) {
+      html += `<div class="kv"><span class="k" style="font-size:10px;padding-left:8px">Winner</span><span class="v green" style="font-size:10px">${esc(exp.winner)}</span></div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderExecQuality(data) {
+  const el = $("execQualityBlock");
+  if (!el) return;
+  if (!data || !data.overall || data.overall.totalExecutions === 0) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No latency data yet</div>';
+    return;
+  }
+
+  const o = data.overall;
+  const scoreColor = data.qualityScore >= 70 ? "green" : data.qualityScore >= 40 ? "amber" : "red";
+  let html = `<div class="kv"><span class="k">Quality Score</span><span class="v ${scoreColor}" style="font-size:14px;font-weight:700">${data.qualityScore}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Avg latency</span><span class="v">${o.avgLatency ?? "-"}ms</span></div>`;
+  html += `<div class="kv"><span class="k">P50 / P95 / P99</span><span class="v">${o.p50 ?? "-"} / ${o.p95 ?? "-"} / ${o.p99 ?? "-"}ms</span></div>`;
+  html += `<div class="kv"><span class="k">Fill rate</span><span class="v ${(data.fillRate || 0) >= 80 ? "green" : "amber"}">${data.fillRate ?? "-"}%</span></div>`;
+
+  if (data.fillStats) {
+    html += `<div class="kv"><span class="k">Filled / Failed</span><span class="v">${data.fillStats.filled || 0} / ${data.fillStats.failed || 0}</span></div>`;
   }
 
   el.innerHTML = html;

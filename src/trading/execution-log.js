@@ -50,14 +50,18 @@ function ensureTable() {
   if (!cols.includes("hour_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN hour_mult REAL");
   if (!cols.includes("sizing_method")) db.exec("ALTER TABLE trade_executions ADD COLUMN sizing_method TEXT");
   if (!cols.includes("day_mult")) db.exec("ALTER TABLE trade_executions ADD COLUMN day_mult REAL");
+  if (!cols.includes("latency_ms")) db.exec("ALTER TABLE trade_executions ADD COLUMN latency_ms INTEGER");
+  if (!cols.includes("experiment_id")) db.exec("ALTER TABLE trade_executions ADD COLUMN experiment_id INTEGER");
+  if (!cols.includes("experiment_arm")) db.exec("ALTER TABLE trade_executions ADD COLUMN experiment_arm TEXT");
 
   stmts = {
     insert: db.prepare(`
       INSERT INTO trade_executions (
         signal_id, market_id, token_id, question, category, side, strength,
         amount, entry_price, fill_price, status, dry_run, order_id, edge,
-        confidence, liquidity_check, error, quality, regime, streak_mult, hour_mult, sizing_method, day_mult
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        confidence, liquidity_check, error, quality, regime, streak_mult, hour_mult, sizing_method, day_mult,
+        latency_ms, experiment_id, experiment_arm
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     close: db.prepare(`
       UPDATE trade_executions
@@ -99,7 +103,8 @@ export function logExecution({
   signalId, marketId, tokenId, question, category, side, strength,
   amount, entryPrice, fillPrice, status = "open", dryRun = true,
   orderId, edge, confidence, liquidityCheck, error,
-  quality, regime, streakMult, hourMult, sizingMethod, dayMult
+  quality, regime, streakMult, hourMult, sizingMethod, dayMult,
+  latencyMs, experimentId, experimentArm
 }) {
   ensureTable();
   const info = stmts.insert.run(
@@ -109,7 +114,8 @@ export function logExecution({
     edge || null, confidence || null,
     liquidityCheck ? JSON.stringify(liquidityCheck) : null,
     error || null,
-    quality ?? null, regime || null, streakMult ?? null, hourMult ?? null, sizingMethod || null, dayMult ?? null
+    quality ?? null, regime || null, streakMult ?? null, hourMult ?? null, sizingMethod || null, dayMult ?? null,
+    latencyMs ?? null, experimentId ?? null, experimentArm || null
   );
   return info.lastInsertRowid;
 }
@@ -940,6 +946,122 @@ export function getRecentPerformance(n = 20) {
  * Get quality tier win rates for adaptive threshold computation.
  * Returns win rate per 10-point quality bucket.
  */
+/**
+ * Execution quality analysis: latency stats, fill rates, quality score.
+ * @param {number} days - Lookback period
+ * @returns {{ overall, byHour, bySize, fillRate, qualityScore }}
+ */
+export function getExecutionQuality(days = 30) {
+  ensureTable();
+  const db = getDb();
+  const daysOffset = `-${Math.min(Math.max(days, 1), 180)} days`;
+
+  // Overall latency stats
+  const overall = db.prepare(`
+    SELECT
+      COUNT(*) as total_executions,
+      AVG(latency_ms) as avg_latency,
+      MIN(latency_ms) as min_latency,
+      MAX(latency_ms) as max_latency,
+      SUM(CASE WHEN status = 'open' OR status = 'closed' THEN 1 ELSE 0 END) as successful,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+      SUM(CASE WHEN fill_price IS NOT NULL AND entry_price IS NOT NULL THEN 1 ELSE 0 END) as with_fill
+    FROM trade_executions
+    WHERE opened_at >= datetime('now', ?)
+      AND latency_ms IS NOT NULL
+  `).get(daysOffset);
+
+  // Percentiles via sorted values
+  const latencies = db.prepare(`
+    SELECT latency_ms FROM trade_executions
+    WHERE opened_at >= datetime('now', ?) AND latency_ms IS NOT NULL
+    ORDER BY latency_ms ASC
+  `).all(daysOffset).map(r => r.latency_ms);
+
+  const p50 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.5)] : null;
+  const p95 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.95)] : null;
+  const p99 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.99)] : null;
+
+  // Latency by hour
+  const byHour = db.prepare(`
+    SELECT
+      CAST(strftime('%H', opened_at) AS INTEGER) as hour,
+      COUNT(*) as trades,
+      AVG(latency_ms) as avg_latency,
+      MAX(latency_ms) as max_latency
+    FROM trade_executions
+    WHERE opened_at >= datetime('now', ?) AND latency_ms IS NOT NULL
+    GROUP BY hour
+    ORDER BY hour
+  `).all(daysOffset);
+
+  // Latency by bet size bucket
+  const bySize = db.prepare(`
+    SELECT
+      CASE
+        WHEN amount < 1 THEN '<$1'
+        WHEN amount < 5 THEN '$1-5'
+        WHEN amount < 10 THEN '$5-10'
+        ELSE '$10+'
+      END as size_bucket,
+      COUNT(*) as trades,
+      AVG(latency_ms) as avg_latency
+    FROM trade_executions
+    WHERE opened_at >= datetime('now', ?) AND latency_ms IS NOT NULL
+    GROUP BY size_bucket
+  `).all(daysOffset);
+
+  // Fill rate: what % of attempts resulted in a successful open/close
+  const fillStats = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN status IN ('open', 'closed') THEN 1 ELSE 0 END) as filled,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+    FROM trade_executions
+    WHERE opened_at >= datetime('now', ?) AND dry_run = 0
+  `).get(daysOffset);
+
+  const fillRate = fillStats.total > 0 ? Math.round(fillStats.filled / fillStats.total * 100) : null;
+
+  // Composite quality score (0-100)
+  // Based on: latency (low = good), fill rate (high = good), slippage (low = good)
+  let qualityScore = 50; // baseline
+  if (p50 != null) {
+    if (p50 < 500) qualityScore += 20;
+    else if (p50 < 2000) qualityScore += 10;
+    else if (p50 > 5000) qualityScore -= 10;
+  }
+  if (fillRate != null) {
+    if (fillRate >= 90) qualityScore += 20;
+    else if (fillRate >= 70) qualityScore += 10;
+    else if (fillRate < 50) qualityScore -= 15;
+  }
+  if (overall && overall.avg_latency != null && overall.avg_latency < 1000) qualityScore += 10;
+  qualityScore = Math.max(0, Math.min(100, qualityScore));
+
+  // Round values
+  const round = v => v != null ? Math.round(v) : null;
+
+  return {
+    overall: {
+      totalExecutions: overall?.total_executions || 0,
+      avgLatency: round(overall?.avg_latency),
+      minLatency: round(overall?.min_latency),
+      maxLatency: round(overall?.max_latency),
+      p50: round(p50),
+      p95: round(p95),
+      p99: round(p99)
+    },
+    byHour: byHour.map(r => ({ ...r, avg_latency: round(r.avg_latency), max_latency: round(r.max_latency) })),
+    bySize: bySize.map(r => ({ ...r, avg_latency: round(r.avg_latency) })),
+    fillRate,
+    fillStats: { total: fillStats.total, filled: fillStats.filled, failed: fillStats.failed },
+    qualityScore,
+    days
+  };
+}
+
 export function getQualityTierWinRates() {
   ensureTable();
   const db = getDb();
