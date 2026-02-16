@@ -275,6 +275,18 @@
   <div class="section-title">Recovery Predictor</div>
   <div id="recoveryPredEndpoints"></div>
 
+  <div class="section-title">Execution Latency</div>
+  <div id="latencyEndpoints"></div>
+
+  <div class="section-title">Bayesian Posteriors</div>
+  <div id="bayesianEndpoints"></div>
+
+  <div class="section-title">Exit Optimizer</div>
+  <div id="exitOptEndpoints"></div>
+
+  <div class="section-title">Basis Tracker</div>
+  <div id="basisEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -632,6 +644,26 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/portfolio/recovery", desc: "Recovery dashboard: status (recovering/deepening), drawdown amount, days to breakeven, regime stability, resume-trading signal with conditions", tryable: true },
     { method: "GET", path: "/api/portfolio/recovery/time?days=30", desc: "Recovery time estimate: optimistic/base/pessimistic paths, daily P&L rate, confidence, high water mark distance", tryable: true },
     { method: "GET", path: "/api/portfolio/regime-transitions?days=14", desc: "Regime transition speed: transition count and frequency, avg gap between shifts, sharpness score, reversal risk level", tryable: true }
+  ],
+  latencyEndpoints: [
+    { method: "GET", path: "/api/engines/latency", desc: "Latency dashboard: P50/P95/P99 percentiles, bottleneck count, regime-level timing, recommendations", tryable: true },
+    { method: "GET", path: "/api/engines/latency/detailed?days=14", desc: "Detailed latency analysis: inter-trade timing percentiles by regime, hourly patterns, bottleneck detection, tail latency ratio", tryable: true },
+    { method: "GET", path: "/api/engines/latency/predict?regime=RANGE&confidence=0.6&shares=10", desc: "Predict fill time: estimated ms with confidence/size adjustments, regime-based P50/P95 benchmarks", tryable: true }
+  ],
+  bayesianEndpoints: [
+    { method: "GET", path: "/api/engines/bayesian", desc: "Posterior overview: all Beta-Binomial posteriors with mean/mode/variance/entropy, most/least confident sources", tryable: true },
+    { method: "GET", path: "/api/engines/bayesian/calibrate?days=30", desc: "Calibrate posteriors from historical trades: updates by method, regime, and category with observed win rates", tryable: true },
+    { method: "GET", path: "/api/engines/bayesian/interval?key=method_default&credibility=0.90", desc: "Credible interval for a posterior: lower/upper bounds, width, mean, mode, variance, entropy", tryable: true }
+  ],
+  exitOptEndpoints: [
+    { method: "GET", path: "/api/trading/exit-optimizer", desc: "Exit optimizer dashboard: profit factor, early/late exit rates, optimal stop/TP in bps, risk-reward ratio, recommendations", tryable: true },
+    { method: "GET", path: "/api/trading/exit-timing?days=30", desc: "Exit timing analysis: win/loss counts, avg win/loss size, regime-level exit quality, early/late exit detection", tryable: true },
+    { method: "GET", path: "/api/trading/exit-params?days=30", desc: "Optimal exit parameters: historically-derived stop-loss and take-profit in bps, per-regime breakdown with win rates", tryable: true }
+  ],
+  basisEndpoints: [
+    { method: "GET", path: "/api/trading/basis", desc: "Basis dashboard: avg basis, std dev, divergence count, calibration error, best/worst category, strong revert signals", tryable: true },
+    { method: "GET", path: "/api/trading/basis/overview?days=7", desc: "Basis overview: per-market confidence vs actual win rate (basis proxy), undervalued/overvalued/fair signals, distribution stats", tryable: true },
+    { method: "GET", path: "/api/trading/basis/signals?days=14", desc: "Basis mean-reversion signals: buy/sell direction, strength (strong/moderate), confidence, rationale for each mispriced market", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

@@ -101,6 +101,10 @@ import { getDriftDashboard, trackPortfolioDrift, evaluateRebalancingROI } from "
 import { getCostOptimizationDashboard, analyzeHistoricalCosts, computeOptimalSplit } from "../trading/cost-optimizer.js";
 import { getArbiterStatus, computeWinRateWeights, detectSignalConflict } from "../engines/signal-arbiter.js";
 import { getRecoveryDashboard, estimateRecoveryTime, detectRegimeTransitionSpeed } from "../portfolio/recovery-predictor.js";
+import { getLatencyDashboard, analyzeExecutionLatency, predictFillTime } from "../engines/execution-latency.js";
+import { getPosteriorOverview, calibrateFromHistory as calibratePosteriors, getCredibleInterval } from "../engines/bayesian-posterior.js";
+import { getExitDashboard, analyzeExitTiming, getOptimalExitParams } from "../trading/exit-optimizer.js";
+import { getBasisDashboard, getBasisOverview, getBasisRevertSignals } from "../trading/basis-tracker.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1378,6 +1382,67 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/portfolio/regime-transitions", async (req) => {
     const days = Math.min(Number(req.query.days) || 14, 90);
     return detectRegimeTransitionSpeed(days);
+  });
+
+  /* ── Tier 40: Latency Analytics & Bayesian Intelligence ── */
+
+  app.get("/api/engines/latency", async () => {
+    return getLatencyDashboard();
+  });
+
+  app.get("/api/engines/latency/detailed", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return analyzeExecutionLatency(days);
+  });
+
+  app.get("/api/engines/latency/predict", async (req) => {
+    const regime = req.query.regime || "RANGE";
+    const confidence = Number(req.query.confidence) || 0.5;
+    const shares = Number(req.query.shares) || 10;
+    return predictFillTime({ regime, confidence, shares });
+  });
+
+  app.get("/api/engines/bayesian", async () => {
+    return getPosteriorOverview();
+  });
+
+  app.get("/api/engines/bayesian/calibrate", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return calibratePosteriors(days);
+  });
+
+  app.get("/api/engines/bayesian/interval", async (req) => {
+    const key = req.query.key || "method_default";
+    const credibility = Number(req.query.credibility) || 0.90;
+    return getCredibleInterval(key, credibility);
+  });
+
+  app.get("/api/trading/exit-optimizer", async () => {
+    return getExitDashboard();
+  });
+
+  app.get("/api/trading/exit-timing", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return analyzeExitTiming(days);
+  });
+
+  app.get("/api/trading/exit-params", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getOptimalExitParams(days);
+  });
+
+  app.get("/api/trading/basis", async () => {
+    return getBasisDashboard();
+  });
+
+  app.get("/api/trading/basis/overview", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return getBasisOverview(days);
+  });
+
+  app.get("/api/trading/basis/signals", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return getBasisRevertSignals(days);
   });
 
   /* ── Trading Status API ── */

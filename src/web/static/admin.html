@@ -508,6 +508,30 @@
       <div id="recoveryPredBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Execution Latency (Tier 40) -->
+    <div class="card">
+      <div class="card-title">Execution Latency</div>
+      <div id="latencyBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Bayesian Posterior (Tier 40) -->
+    <div class="card">
+      <div class="card-title">Bayesian Posteriors</div>
+      <div id="bayesianBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Exit Optimizer (Tier 40) -->
+    <div class="card">
+      <div class="card-title">Exit Optimizer</div>
+      <div id="exitOptBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Basis Tracker (Tier 40) -->
+    <div class="card">
+      <div class="card-title">Basis Tracker</div>
+      <div id="basisBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -571,7 +595,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData, driftMonData, costOptData, arbiterData, recoveryPredData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData, driftMonData, costOptData, arbiterData, recoveryPredData, latencyData, bayesianData, exitOptData, basisData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -639,7 +663,11 @@ async function loadAdmin() {
       fetch("/api/portfolio/drift").then(r => r.json()).catch(() => null),
       fetch("/api/trading/cost-optimization").then(r => r.json()).catch(() => null),
       fetch("/api/engines/signal-arbiter").then(r => r.json()).catch(() => null),
-      fetch("/api/portfolio/recovery").then(r => r.json()).catch(() => null)
+      fetch("/api/portfolio/recovery").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/latency").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/bayesian").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/exit-optimizer").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/basis").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -708,6 +736,10 @@ async function loadAdmin() {
     if (costOptData) renderCostOpt(costOptData);
     if (arbiterData) renderArbiter(arbiterData);
     if (recoveryPredData) renderRecoveryPred(recoveryPredData);
+    if (latencyData) renderLatency(latencyData);
+    if (bayesianData) renderBayesian(bayesianData);
+    if (exitOptData) renderExitOpt(exitOptData);
+    if (basisData) renderBasis(basisData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2514,6 +2546,68 @@ function renderRecoveryPred(data) {
   if (data.recommendation) {
     html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(data.recommendation)}</div>`;
   }
+  el.innerHTML = html;
+}
+
+function renderLatency(data) {
+  const el = $("latencyBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">P50</span><span class="v">${data.p50 || 0}ms</span></div>`;
+  html += `<div class="kv"><span class="k">P95</span><span class="v">${data.p95 || 0}ms</span></div>`;
+  html += `<div class="kv"><span class="k">P99</span><span class="v">${data.p99 || 0}ms</span></div>`;
+  html += `<div class="kv"><span class="k">Bottlenecks</span><span class="v">${data.bottleneckCount || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Samples</span><span class="v">${data.totalSamples || 0}</span></div>`;
+  if (data.recommendations?.length) {
+    for (const r of data.recommendations.slice(0, 2)) {
+      html += `<div style="font-size:9px;color:#4b5563;margin-top:2px">${esc(r)}</div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderBayesian(data) {
+  const el = $("bayesianBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Posteriors</span><span class="v">${data.totalPosteriors || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Total Updates</span><span class="v">${data.totalUpdates || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg Mean</span><span class="v">${data.avgMean || 0}</span></div>`;
+  if (data.mostConfident) {
+    html += `<div class="kv"><span class="k">Best</span><span class="v" style="color:#22c55e">${esc(data.mostConfident.key)} (${data.mostConfident.mean})</span></div>`;
+  }
+  if (data.leastConfident) {
+    html += `<div class="kv"><span class="k">Worst</span><span class="v" style="color:#ef4444">${esc(data.leastConfident.key)} (${data.leastConfident.mean})</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderExitOpt(data) {
+  const el = $("exitOptBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Profit Factor</span><span class="v">${data.profitFactor || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Early Exit Rate</span><span class="v">${((data.earlyExitRate || 0) * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Late Exit Rate</span><span class="v">${((data.lateExitRate || 0) * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Optimal Stop</span><span class="v">${data.optimalStopBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k">Optimal TP</span><span class="v">${data.optimalTpBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k">R:R Ratio</span><span class="v">${data.riskRewardRatio || 0}</span></div>`;
+  if (data.recommendations?.length) {
+    for (const r of data.recommendations.slice(0, 2)) {
+      html += `<div style="font-size:9px;color:#4b5563;margin-top:2px">${esc(r)}</div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderBasis(data) {
+  const el = $("basisBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Avg Basis</span><span class="v">${data.avgBasis || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Basis Std</span><span class="v">${data.basisStd || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Divergences</span><span class="v">${data.divergenceCount || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Markets</span><span class="v">${data.marketsAnalyzed || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Calib Error</span><span class="v">${data.avgCalibrationError || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Revert Signals</span><span class="v">${data.strongRevertSignals || 0} strong</span></div>`;
+  html += `<div class="kv"><span class="k">Best Category</span><span class="v" style="color:#22c55e">${esc(data.bestCategory || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Worst Category</span><span class="v" style="color:#ef4444">${esc(data.worstCategory || 'unknown')}</span></div>`;
   el.innerHTML = html;
 }
 
