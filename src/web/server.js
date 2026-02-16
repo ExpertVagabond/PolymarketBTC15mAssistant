@@ -54,6 +54,10 @@ import { getFactorImportance, getWinningFactorProfile } from "../engines/factor-
 import { runStressTest, getTailRisk } from "../portfolio/stress-test.js";
 import { getDecisionHistory, getNearMisses, getFilterCostAnalysis } from "../trading/decision-tracker.js";
 import { getHedgeRecommendations, getCategoryExposure, getPortfolioBeta } from "../portfolio/hedge-engine.js";
+import { getMicrostructureStats, isTradeable } from "../engines/microstructure.js";
+import { getRegimeSizingMultiplier, getSizingProfile } from "../engines/regime-sizing.js";
+import { replaySignals, compareStrategies as compareReplayStrategies } from "../engines/signal-replay.js";
+import { getTimingAnalysis, getOptimalWindows, getTimingRecommendation } from "../engines/time-optimizer.js";
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
@@ -897,6 +901,65 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
   app.get("/api/analytics/winning-profile", async (req) => {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
     return getWinningFactorProfile(days);
+  });
+
+  /* ── Market Microstructure ── */
+
+  app.get("/api/analytics/microstructure", async () => {
+    return getMicrostructureStats();
+  });
+
+  /* ── Regime-Adaptive Sizing ── */
+
+  app.get("/api/trading/regime-sizing", async () => {
+    return getSizingProfile();
+  });
+
+  app.get("/api/trading/regime-sizing/current", async (req) => {
+    const regime = req.query.regime || "RANGE";
+    const hour = req.query.hour != null ? Number(req.query.hour) : new Date().getUTCHours();
+    const tick = { regime, hour };
+    return getRegimeSizingMultiplier(tick, {
+      portfolioBeta: req.query.beta != null ? Number(req.query.beta) : undefined,
+      correlationLoad: req.query.corrLoad != null ? Number(req.query.corrLoad) : undefined,
+      ensembleAgreement: req.query.agreement != null ? Number(req.query.agreement) : undefined
+    });
+  });
+
+  /* ── Signal Replay ── */
+
+  app.get("/api/analytics/signal-replay", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    const params = {};
+    if (req.query.minConfidence) params.minConfidence = Number(req.query.minConfidence);
+    if (req.query.minEdge) params.minEdge = Number(req.query.minEdge);
+    if (req.query.minQuality) params.minQuality = Number(req.query.minQuality);
+    if (req.query.regimes) params.allowedRegimes = req.query.regimes.split(",");
+    return replaySignals(days, params);
+  });
+
+  app.get("/api/analytics/strategy-compare", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return compareReplayStrategies(days);
+  });
+
+  /* ── Execution Timing ── */
+
+  app.get("/api/analytics/timing", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getTimingAnalysis(days);
+  });
+
+  app.get("/api/analytics/timing/windows", async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+    return getOptimalWindows(days);
+  });
+
+  app.get("/api/analytics/timing/recommendation", async (req) => {
+    const hour = Number(req.query.hour ?? new Date().getUTCHours());
+    const dow = Number(req.query.dow ?? new Date().getUTCDay());
+    const regime = req.query.regime || "RANGE";
+    return getTimingRecommendation(hour, dow, regime);
   });
 
   /* ── Trading Status API ── */

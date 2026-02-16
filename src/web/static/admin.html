@@ -316,6 +316,30 @@
       <div id="snapshotBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Market Microstructure -->
+    <div class="card">
+      <div class="card-title">Market Microstructure</div>
+      <div id="microstructureBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Regime Sizing -->
+    <div class="card">
+      <div class="card-title">Regime-Adaptive Sizing</div>
+      <div id="regimeSizingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Strategy Compare -->
+    <div class="card">
+      <div class="card-title">Strategy Replay</div>
+      <div id="replayBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Timing Optimizer -->
+    <div class="card">
+      <div class="card-title">Timing Optimizer</div>
+      <div id="timingBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -379,7 +403,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -415,7 +439,11 @@ async function loadAdmin() {
       fetch("/api/models/ensemble/performance").then(r => r.json()).catch(() => null),
       fetch("/api/regime/forecast").then(r => r.json()).catch(() => null),
       fetch("/api/analytics/factor-importance?days=30").then(r => r.json()).catch(() => null),
-      fetch("/api/system/snapshots?limit=10").then(r => r.json()).catch(() => null)
+      fetch("/api/system/snapshots?limit=10").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/microstructure").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/regime-sizing").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/strategy-compare?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/timing/windows?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -452,6 +480,10 @@ async function loadAdmin() {
     if (regimeForecastData) renderRegimeForecast(regimeForecastData);
     if (factorData) renderFactors(factorData);
     if (snapshotData) renderSnapshots(snapshotData);
+    if (microstructureData) renderMicrostructure(microstructureData);
+    if (regimeSizingData) renderRegimeSizing(regimeSizingData);
+    if (replayData) renderReplay(replayData);
+    if (timingData) renderTiming(timingData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1537,6 +1569,111 @@ function renderSnapshots(data) {
   for (const s of data.snapshots.slice(0, 5)) {
     const typeColor = s.type === "startup" ? "blue" : s.type === "shutdown" ? "amber" : "";
     html += `<div class="kv"><span class="k" style="font-size:10px">${new Date(s.timestamp).toLocaleTimeString()}</span><span class="v ${typeColor}" style="font-size:10px">${s.type} | ${s.botState} | ${s.openPositions}pos</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderMicrostructure(data) {
+  const el = $("microstructureBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No microstructure data</div>';
+    return;
+  }
+
+  const s = data.summary;
+  const qColor = s.overallQuality === "healthy" ? "green" : s.overallQuality === "fair" ? "amber" : "red";
+  let html = `<div class="kv"><span class="k">Markets tracked</span><span class="v">${s.totalTracked}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg liquidity</span><span class="v ${qColor}">${s.avgLiquidityScore}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Low liquidity</span><span class="v ${s.lowLiquidityMarkets > 0 ? "red" : ""}">${s.lowLiquidityMarkets}</span></div>`;
+  html += `<div class="kv"><span class="k">Toxic flow</span><span class="v ${s.toxicFlowMarkets > 0 ? "amber" : ""}">${s.toxicFlowMarkets}</span></div>`;
+
+  for (const m of (data.markets || []).slice(0, 4)) {
+    const lqColor = m.liquidityScore >= 70 ? "green" : m.liquidityScore >= 40 ? "amber" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${esc(m.marketId?.slice(0, 16))}</span><span class="v ${lqColor}" style="font-size:10px">${m.liquidityScore} | spr:${m.spread?.stability}</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRegimeSizing(data) {
+  const el = $("regimeSizingBlock");
+  if (!el) return;
+  if (!data || !data.regimeMultipliers) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No sizing data</div>';
+    return;
+  }
+
+  let html = '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-bottom:4px">REGIME MULTIPLIERS</div>';
+  for (const [regime, mult] of Object.entries(data.regimeMultipliers)) {
+    const color = mult > 1.0 ? "green" : mult < 1.0 ? "red" : "";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${regime}</span><span class="v ${color}" style="font-size:10px">${mult}x</span></div>`;
+  }
+
+  const hourMults = data.hourMultipliers || {};
+  const hourKeys = Object.keys(hourMults);
+  if (hourKeys.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:4px">HOUR ADJUSTMENTS</div>';
+    for (const h of hourKeys.sort((a, b) => a - b).slice(0, 6)) {
+      const m = hourMults[h];
+      const color = m > 1.0 ? "green" : m < 1.0 ? "red" : "";
+      html += `<div class="kv"><span class="k" style="font-size:10px">${h}:00</span><span class="v ${color}" style="font-size:10px">${m}x</span></div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderReplay(data) {
+  const el = $("replayBlock");
+  if (!el) return;
+  if (!data || !data.strategies) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No replay data</div>';
+    return;
+  }
+
+  let html = '';
+  if (data.winner) {
+    html += `<div class="kv"><span class="k">Winner</span><span class="v green">${esc(data.winner)}</span></div>`;
+  }
+
+  for (const s of data.strategies) {
+    const isWinner = s.name === data.winner;
+    const pnlColor = s.totalPnl >= 0 ? "green" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px;${isWinner ? "color:#34d399;font-weight:700" : ""}">${esc(s.name)}</span><span class="v" style="font-size:10px">${s.winRate ?? "-"}% | <span class="${pnlColor}">$${s.totalPnl}</span> (${s.settled}t)</span></div>`;
+  }
+
+  html += `<div style="font-size:9px;color:#4b5563;margin-top:6px">${data.days}d lookback</div>`;
+  el.innerHTML = html;
+}
+
+function renderTiming(data) {
+  const el = $("timingBlock");
+  if (!el) return;
+  if (!data || data.insufficient) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">Insufficient data</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Base win rate</span><span class="v">${data.baseWinRate}%</span></div>`;
+
+  if (data.hot?.length > 0) {
+    html += '<div style="font-size:9px;color:#34d399;font-weight:700;margin-top:6px;margin-bottom:2px">HOT WINDOWS</div>';
+    for (const w of data.hot.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(w.label)}</span><span class="v green" style="font-size:10px">${w.winRate}% (+${w.lift})</span></div>`;
+    }
+  }
+
+  if (data.cold?.length > 0) {
+    html += '<div style="font-size:9px;color:#f87171;font-weight:700;margin-top:6px;margin-bottom:2px">COLD WINDOWS</div>';
+    for (const w of data.cold.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(w.label)}</span><span class="v red" style="font-size:10px">${w.winRate}% (-${w.deficit})</span></div>`;
+    }
+  }
+
+  if ((data.hot || []).length === 0 && (data.cold || []).length === 0) {
+    html += '<div style="color:#4b5563;font-size:11px;margin-top:6px">No significant timing patterns detected</div>';
   }
 
   el.innerHTML = html;

@@ -179,6 +179,18 @@
   <div class="section-title">State Snapshots</div>
   <div id="snapshotEndpoints"></div>
 
+  <div class="section-title">Market Microstructure</div>
+  <div id="microstructureEndpoints"></div>
+
+  <div class="section-title">Regime-Adaptive Sizing</div>
+  <div id="regimeSizingEndpoints"></div>
+
+  <div class="section-title">Signal Replay</div>
+  <div id="signalReplayEndpoints"></div>
+
+  <div class="section-title">Execution Timing</div>
+  <div id="timingEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -392,6 +404,22 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/system/snapshots?limit=50", desc: "State snapshot history: periodic captures of open positions, risk state, bot state, learning version", tryable: true },
     { method: "GET", path: "/api/system/snapshot/latest", desc: "Latest state snapshot with full detail for crash recovery", tryable: true },
     { method: "POST", path: "/api/system/snapshot", desc: "Manually take a state snapshot (auth required)" }
+  ],
+  microstructureEndpoints: [
+    { method: "GET", path: "/api/analytics/microstructure", desc: "Market microstructure analysis: spread stability, depth persistence, toxic flow detection, liquidity scores for all tracked markets", tryable: true }
+  ],
+  regimeSizingEndpoints: [
+    { method: "GET", path: "/api/trading/regime-sizing", desc: "Regime-adaptive sizing profile: regime multipliers, hour-of-day adjustments, and limit ranges", tryable: true },
+    { method: "GET", path: "/api/trading/regime-sizing/current?regime=RANGE", desc: "Current sizing multiplier for a given regime, hour, beta, correlation load, and ensemble agreement", tryable: true }
+  ],
+  signalReplayEndpoints: [
+    { method: "GET", path: "/api/analytics/signal-replay?days=30", desc: "Replay historical signals with alternate parameters: supports minConfidence, minEdge, minQuality, regimes overrides", tryable: true },
+    { method: "GET", path: "/api/analytics/strategy-compare?days=30", desc: "Compare 4 strategy configurations (current, aggressive, conservative, trend-only) side by side with simulated P&L", tryable: true }
+  ],
+  timingEndpoints: [
+    { method: "GET", path: "/api/analytics/timing?days=30", desc: "Full timing analysis: hourly, daily, and regime×hour win rate breakdowns with baseline comparison", tryable: true },
+    { method: "GET", path: "/api/analytics/timing/windows?days=30", desc: "Optimal trading windows: hot (high win rate) and cold (low win rate) time slots with statistical significance", tryable: true },
+    { method: "GET", path: "/api/analytics/timing/recommendation?hour=14&dow=3&regime=RANGE", desc: "Real-time timing recommendation: trade/aggressive/cautious/avoid based on current hour, day, and regime", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
