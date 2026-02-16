@@ -203,6 +203,18 @@
   <div class="section-title">Signal Freshness</div>
   <div id="freshnessEndpoints"></div>
 
+  <div class="section-title">Execution Quality</div>
+  <div id="execQualityEndpoints"></div>
+
+  <div class="section-title">Portfolio Optimizer</div>
+  <div id="portfolioOptEndpoints"></div>
+
+  <div class="section-title">Arbitrage Detection</div>
+  <div id="arbitrageEndpoints"></div>
+
+  <div class="section-title">Market Sentiment</div>
+  <div id="sentimentEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -448,6 +460,24 @@ const ENDPOINTS = {
   ],
   freshnessEndpoints: [
     { method: "GET", path: "/api/signals/freshness-profile", desc: "Signal freshness profile: category-specific half-lives, regime decay multipliers, decay curves, and staleness thresholds", tryable: true }
+  ],
+  execQualityEndpoints: [
+    { method: "GET", path: "/api/trading/implementation-shortfall?days=30", desc: "Implementation shortfall analysis: slippage decomposition into spread cost, market impact, and timing cost with per-regime breakdowns", tryable: true },
+    { method: "GET", path: "/api/trading/counterfactual?days=14", desc: "Counterfactual timing analysis: simulates alternate entry points (-5 to +5 min) to estimate optimal execution timing", tryable: true },
+    { method: "GET", path: "/api/trading/factor-pnl?days=30", desc: "Factor P&L attribution: decomposes returns by regime, category, side, confidence quartile, quality, and edge to identify top contributors and detractors", tryable: true }
+  ],
+  portfolioOptEndpoints: [
+    { method: "GET", path: "/api/portfolio/optimize", desc: "Portfolio optimization: current vs target allocation, category concentration limits, directional bias check, constraint violations, and rebalance actions", tryable: true },
+    { method: "GET", path: "/api/portfolio/rebalance-schedule", desc: "Rebalancing schedule: time-based, drift-based, and violation-based triggers with last rebalance timestamp", tryable: true },
+    { method: "GET", path: "/api/portfolio/efficient-frontier?days=30", desc: "Efficient frontier approximation: risk/return tradeoffs at various concentration levels with per-category Sharpe ratios", tryable: true }
+  ],
+  arbitrageEndpoints: [
+    { method: "GET", path: "/api/analytics/arbitrage", desc: "Arbitrage scanner: detects complementary mismatches (YES+NO != $1), category outliers (z-score > 2), and cross-market divergences with edge estimates", tryable: true },
+    { method: "GET", path: "/api/analytics/arbitrage/heatmap", desc: "Arbitrage heatmap: per-category mispricing scores showing where the most exploitable discrepancies exist", tryable: true }
+  ],
+  sentimentEndpoints: [
+    { method: "GET", path: "/api/analytics/sentiment", desc: "Market sentiment: aggregate bullish/bearish/neutral scores (-100 to +100) derived from price momentum, volume, spreads, orderbook imbalance, and volatility", tryable: true },
+    { method: "GET", path: "/api/analytics/sentiment/momentum", desc: "Sentiment momentum: detects directional shifts in market sentiment with magnitude and category breakdown", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

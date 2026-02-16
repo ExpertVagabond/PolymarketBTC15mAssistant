@@ -364,6 +364,30 @@
       <div id="freshnessBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Execution Quality (Tier 34) -->
+    <div class="card">
+      <div class="card-title">Execution Quality</div>
+      <div id="execQualityBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Portfolio Optimizer (Tier 34) -->
+    <div class="card">
+      <div class="card-title">Portfolio Optimizer</div>
+      <div id="portfolioOptBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Arbitrage Detection (Tier 34) -->
+    <div class="card">
+      <div class="card-title">Arbitrage Detection</div>
+      <div id="arbitrageBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Market Sentiment (Tier 34) -->
+    <div class="card">
+      <div class="card-title">Market Sentiment</div>
+      <div id="sentimentBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -427,7 +451,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -471,7 +495,11 @@ async function loadAdmin() {
       fetch("/api/portfolio/liquidation-risk").then(r => r.json()).catch(() => null),
       fetch("/api/analytics/regime-divergence?days=14").then(r => r.json()).catch(() => null),
       fetch("/api/scanner/liquidity-forecast").then(r => r.json()).catch(() => null),
-      fetch("/api/signals/freshness-profile").then(r => r.json()).catch(() => null)
+      fetch("/api/signals/freshness-profile").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/implementation-shortfall?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/optimize").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/arbitrage").then(r => r.json()).catch(() => null),
+      fetch("/api/analytics/sentiment").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -516,6 +544,10 @@ async function loadAdmin() {
     if (divergenceData) renderDivergence(divergenceData);
     if (liquidityData) renderLiquidity(liquidityData);
     if (freshnessData) renderFreshness(freshnessData);
+    if (shortfallData) renderShortfall(shortfallData);
+    if (portfolioOptData) renderPortfolioOpt(portfolioOptData);
+    if (arbitrageData) renderArbitrage(arbitrageData);
+    if (sentimentData) renderSentiment(sentimentData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1801,6 +1833,103 @@ function renderFreshness(data) {
     html += `<div class="kv"><span class="k" style="font-size:10px">${esc(c.category)}</span><span class="v" style="font-size:10px">${c.halfLife}min (stale@${c.staleAt}min)</span></div>`;
   }
 
+  el.innerHTML = html;
+}
+
+function renderShortfall(data) {
+  const el = $("execQualityBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No execution quality data</div>';
+    return;
+  }
+  const s = data.summary;
+  const cb = s.costBreakdown || {};
+  let html = `<div class="kv"><span class="k">Trades analyzed</span><span class="v">${s.count}</span></div>`;
+  html += `<div class="kv"><span class="k">Avg delay</span><span class="v ${s.avgDelayMinutes > 2 ? 'red' : 'green'}">${s.avgDelayMinutes} min</span></div>`;
+  html += `<div class="kv"><span class="k">Avg slippage</span><span class="v ${s.avgSlippageBps > 10 ? 'red' : 'amber'}">${s.avgSlippageBps} bps</span></div>`;
+  html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">COST DECOMPOSITION</div>';
+  html += `<div class="kv"><span class="k" style="font-size:10px">Spread</span><span class="v" style="font-size:10px">${cb.spreadBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k" style="font-size:10px">Impact</span><span class="v" style="font-size:10px">${cb.impactBps || 0} bps</span></div>`;
+  html += `<div class="kv"><span class="k" style="font-size:10px">Timing</span><span class="v" style="font-size:10px">${cb.timingBps || 0} bps</span></div>`;
+  if (s.byRegime) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY REGIME</div>';
+    for (const [r, d] of Object.entries(s.byRegime).slice(0, 4)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(r)}</span><span class="v" style="font-size:10px">${d.avgDelay}m / ${d.avgSlipBps}bps (${d.count})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderPortfolioOpt(data) {
+  const el = $("portfolioOptBlock");
+  if (!el) return;
+  if (!data || !data.current) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No portfolio data</div>';
+    return;
+  }
+  const scoreColor = data.score >= 80 ? 'green' : data.score >= 50 ? 'amber' : 'red';
+  let html = `<div class="kv"><span class="k">Score</span><span class="v ${scoreColor}">${data.score}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Positions</span><span class="v">${data.current.positions}</span></div>`;
+  html += `<div class="kv"><span class="k">Dir. bias</span><span class="v ${data.current.directionalBias > 0.5 ? 'red' : 'green'}">${(data.current.directionalBias * 100).toFixed(1)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Violations</span><span class="v ${data.violations.length > 0 ? 'red' : 'green'}">${data.violations.length}</span></div>`;
+  if (data.rebalanceActions && data.rebalanceActions.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">REBALANCE ACTIONS</div>';
+    for (const a of data.rebalanceActions.slice(0, 4)) {
+      const icon = a.action === 'reduce' ? '↓' : '↑';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${icon} ${esc(a.category)}</span><span class="v" style="font-size:10px">${(a.driftPct * 100).toFixed(1)}% drift</span></div>`;
+    }
+  }
+  html += `<div style="font-size:10px;color:#6b7280;margin-top:6px">${esc(data.recommendation || '')}</div>`;
+  el.innerHTML = html;
+}
+
+function renderArbitrage(data) {
+  const el = $("arbitrageBlock");
+  if (!el) return;
+  if (!data || !data.summary) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No arbitrage data</div>';
+    return;
+  }
+  const s = data.summary;
+  let html = `<div class="kv"><span class="k">Markets scanned</span><span class="v">${s.marketsScanned}</span></div>`;
+  html += `<div class="kv"><span class="k">Opportunities</span><span class="v ${s.opportunitiesFound > 0 ? 'amber' : 'green'}">${s.opportunitiesFound}</span></div>`;
+  html += `<div class="kv"><span class="k">High confidence</span><span class="v ${s.highConfidence > 0 ? 'red' : 'green'}">${s.highConfidence}</span></div>`;
+  if (s.byType) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY TYPE</div>';
+    html += `<div class="kv"><span class="k" style="font-size:10px">Complementary</span><span class="v" style="font-size:10px">${s.byType.complementary || 0}</span></div>`;
+    html += `<div class="kv"><span class="k" style="font-size:10px">Category outlier</span><span class="v" style="font-size:10px">${s.byType.categoryOutlier || 0}</span></div>`;
+    html += `<div class="kv"><span class="k" style="font-size:10px">Cross-market</span><span class="v" style="font-size:10px">${s.byType.crossMarket || 0}</span></div>`;
+  }
+  if (data.opportunities && data.opportunities.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">TOP OPPORTUNITIES</div>';
+    for (const o of data.opportunities.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(o.type)}</span><span class="v" style="font-size:10px">${o.edgeBps || 0}bps (${o.confidence})</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderSentiment(data) {
+  const el = $("sentimentBlock");
+  if (!el) return;
+  if (!data || !data.overall) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No sentiment data</div>';
+    return;
+  }
+  const o = data.overall;
+  const sentColor = o.score > 15 ? 'green' : o.score < -15 ? 'red' : 'amber';
+  let html = `<div class="kv"><span class="k">Overall</span><span class="v ${sentColor}">${o.score > 0 ? '+' : ''}${o.score} (${esc(o.label)})</span></div>`;
+  html += `<div class="kv"><span class="k">Markets</span><span class="v">${o.marketCount}</span></div>`;
+  html += `<div class="kv"><span class="k">Bullish</span><span class="v green">${(o.bullishPct * 100).toFixed(0)}%</span></div>`;
+  html += `<div class="kv"><span class="k">Bearish</span><span class="v red">${(o.bearishPct * 100).toFixed(0)}%</span></div>`;
+  if (data.byCategory && data.byCategory.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">BY CATEGORY</div>';
+    for (const c of data.byCategory.slice(0, 5)) {
+      const catColor = c.avgScore > 15 ? 'green' : c.avgScore < -15 ? 'red' : 'amber';
+      html += `<div class="kv"><span class="k" style="font-size:10px">${esc(c.category)}</span><span class="v ${catColor}" style="font-size:10px">${c.avgScore > 0 ? '+' : ''}${c.avgScore} (${c.marketCount})</span></div>`;
+    }
+  }
   el.innerHTML = html;
 }
 

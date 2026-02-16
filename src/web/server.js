@@ -77,6 +77,10 @@ import { queryAuditLog, getAuditSummary, getExecutionAuditTrail, reconcilePositi
 import { getWalletBalance } from "../trading/wallet.js";
 import { getRealtimePnl } from "../trading/pnl-tracker.js";
 import { getTradingConfig, getTradingConfigDetailed, updateTradingConfig } from "../trading/trading-config.js";
+import { getImplementationShortfall, getCounterfactualAnalysis, getFactorPnlAttribution } from "../trading/execution-quality.js";
+import { optimizePortfolio, getRebalanceSchedule, getEfficientFrontier } from "../portfolio/optimizer.js";
+import { scanArbitrageOpportunities, getArbitrageHeatmap } from "../engines/arbitrage-detector.js";
+import { getAggregateSentiment, getSentimentMomentum } from "../engines/sentiment-scorer.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1008,6 +1012,58 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.get("/api/signals/freshness-profile", async () => {
     return getFreshnessProfile();
+  });
+
+  /* ── Execution Quality API (Tier 34) ── */
+
+  app.get("/api/trading/implementation-shortfall", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getImplementationShortfall(days);
+  });
+
+  app.get("/api/trading/counterfactual", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return getCounterfactualAnalysis(days);
+  });
+
+  app.get("/api/trading/factor-pnl", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getFactorPnlAttribution(days);
+  });
+
+  /* ── Portfolio Optimizer API (Tier 34) ── */
+
+  app.get("/api/portfolio/optimize", async () => {
+    return optimizePortfolio();
+  });
+
+  app.get("/api/portfolio/rebalance-schedule", async () => {
+    return getRebalanceSchedule();
+  });
+
+  app.get("/api/portfolio/efficient-frontier", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getEfficientFrontier(days);
+  });
+
+  /* ── Arbitrage Detection API (Tier 34) ── */
+
+  app.get("/api/analytics/arbitrage", async () => {
+    return scanArbitrageOpportunities();
+  });
+
+  app.get("/api/analytics/arbitrage/heatmap", async () => {
+    return getArbitrageHeatmap();
+  });
+
+  /* ── Sentiment Scoring API (Tier 34) ── */
+
+  app.get("/api/analytics/sentiment", async () => {
+    return getAggregateSentiment();
+  });
+
+  app.get("/api/analytics/sentiment/momentum", async () => {
+    return getSentimentMomentum();
   });
 
   /* ── Trading Status API ── */
