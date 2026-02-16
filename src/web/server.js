@@ -93,6 +93,10 @@ import { createPosition, transitionPosition, getPositionState, getActiveLifecycl
 import { runMonteCarloSimulation, parameterSensitivity, regimeMonteCarlo } from "../backtest/monte-carlo.js";
 import { evaluateAlert, flushCoalesced, getFatigueStatus, resetFatigue } from "../notifications/fatigue-manager.js";
 import { getStrategyAllocation, detectLeadLag, getRotationRecommendations } from "../engines/strategy-selector.js";
+import { getContagionOverview, getSpilloverMap, getCorrelationRegime, detectMarketClusters } from "../engines/contagion-detector.js";
+import { getAdaptiveRiskStatus, getAdaptivePositionLimits, runLiveStressTest, getDeleveragingPlan } from "../portfolio/adaptive-risk-limits.js";
+import { getWalkForwardSummary, runWalkForward } from "../backtest/walk-forward.js";
+import { getEventImpactOverview, getTimeOfDayProfile, getDayOfWeekProfile, matchHistoricalPatterns } from "../engines/event-impact.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1250,6 +1254,71 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
     return getRotationRecommendations({
       currentRegime: req.query.regime || "RANGE",
       forecastRegime: req.query.forecast || req.query.regime || "RANGE"
+    });
+  });
+
+  /* ── Tier 38: Contagion, Adaptive Risk, Walk-Forward, Event Impact ── */
+
+  app.get("/api/engines/contagion", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return getContagionOverview(days);
+  });
+
+  app.get("/api/engines/spillover", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    return getSpilloverMap(days);
+  });
+
+  app.get("/api/engines/correlation-regime", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return getCorrelationRegime(days);
+  });
+
+  app.get("/api/portfolio/adaptive-risk", async () => {
+    return getAdaptiveRiskStatus();
+  });
+
+  app.get("/api/portfolio/adaptive-limits", async (req) => {
+    const days = Math.min(Number(req.query.days) || 7, 90);
+    return getAdaptivePositionLimits(days);
+  });
+
+  app.get("/api/portfolio/live-stress", async (req) => {
+    const days = Math.min(Number(req.query.days) || 14, 90);
+    const shock = Math.min(Number(req.query.shock) || 0.10, 0.50);
+    return runLiveStressTest(days, { shockPct: shock });
+  });
+
+  app.get("/api/portfolio/deleveraging", async (req) => {
+    const maxLoss = Math.min(Number(req.query.maxLoss) || 50, 1000);
+    return getDeleveragingPlan(maxLoss);
+  });
+
+  app.get("/api/backtest/walk-forward", async (req) => {
+    const days = Math.min(Number(req.query.days) || 60, 180);
+    return getWalkForwardSummary(days);
+  });
+
+  app.get("/api/backtest/walk-forward/detailed", async (req) => {
+    const days = Math.min(Number(req.query.days) || 60, 180);
+    return runWalkForward({ totalDays: days });
+  });
+
+  app.get("/api/engines/event-impact", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getEventImpactOverview(days);
+  });
+
+  app.get("/api/engines/time-profile", async (req) => {
+    const days = Math.min(Number(req.query.days) || 30, 180);
+    return getTimeOfDayProfile(days);
+  });
+
+  app.get("/api/engines/pattern-match", async (req) => {
+    return matchHistoricalPatterns({
+      regime: req.query.regime || "RANGE",
+      category: req.query.category,
+      confidence: Number(req.query.confidence) || 0.5
     });
   });
 

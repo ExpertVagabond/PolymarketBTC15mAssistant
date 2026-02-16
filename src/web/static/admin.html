@@ -460,6 +460,30 @@
       <div id="strategySelectorBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- Contagion Detector (Tier 38) -->
+    <div class="card">
+      <div class="card-title">Contagion Risk</div>
+      <div id="contagionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Adaptive Risk Limits (Tier 38) -->
+    <div class="card">
+      <div class="card-title">Adaptive Risk</div>
+      <div id="adaptiveRiskBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Walk-Forward (Tier 38) -->
+    <div class="card">
+      <div class="card-title">Walk-Forward Validation</div>
+      <div id="walkForwardBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Event Impact (Tier 38) -->
+    <div class="card">
+      <div class="card-title">Event Impact</div>
+      <div id="eventImpactBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -523,7 +547,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData, stressData, filterCostData, hedgeData, tailRiskData, ensembleData, regimeForecastData, factorData, snapshotData, microstructureData, regimeSizingData, replayData, timingData, liquidationData, divergenceData, liquidityData, freshnessData, shortfallData, portfolioOptData, arbitrageData, sentimentData, volSurfaceData, varData, onlineLearnerData, patternsData, algoPerf, breakerData, kalmanData, impactData, lifecycleData, monteCarloData, fatigueData, strategyData, contagionData, adaptiveRiskData, walkForwardData, eventImpactData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -583,7 +607,11 @@ async function loadAdmin() {
       fetch("/api/trading/lifecycles").then(r => r.json()).catch(() => null),
       fetch("/api/backtest/monte-carlo?days=30&paths=500").then(r => r.json()).catch(() => null),
       fetch("/api/notifications/fatigue-status").then(r => r.json()).catch(() => null),
-      fetch("/api/engines/strategy-allocation").then(r => r.json()).catch(() => null)
+      fetch("/api/engines/strategy-allocation").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/contagion?days=7").then(r => r.json()).catch(() => null),
+      fetch("/api/portfolio/adaptive-risk").then(r => r.json()).catch(() => null),
+      fetch("/api/backtest/walk-forward?days=60").then(r => r.json()).catch(() => null),
+      fetch("/api/engines/event-impact?days=30").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -644,6 +672,10 @@ async function loadAdmin() {
     if (monteCarloData) renderMonteCarlo(monteCarloData);
     if (fatigueData) renderFatigue(fatigueData);
     if (strategyData) renderStrategySelector(strategyData);
+    if (contagionData) renderContagion(contagionData);
+    if (adaptiveRiskData) renderAdaptiveRisk(adaptiveRiskData);
+    if (walkForwardData) renderWalkForward(walkForwardData);
+    if (eventImpactData) renderEventImpact(eventImpactData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -2294,6 +2326,90 @@ function renderStrategySelector(data) {
     for (const [strat, pct] of Object.entries(data.allocation).slice(0, 5)) {
       html += `<div class="kv"><span class="k" style="font-size:10px">${esc(strat)}</span><span class="v" style="font-size:10px">${(pct * 100).toFixed(1)}%</span></div>`;
     }
+  }
+  el.innerHTML = html;
+}
+
+function renderContagion(data) {
+  const el = $("contagionBlock");
+  if (!el || !data) return;
+  let html = `<div class="kv"><span class="k">Risk Score</span><span class="v" style="color:${data.riskLevel === 'high' ? '#ef4444' : data.riskLevel === 'moderate' ? '#f59e0b' : '#22c55e'}">${data.riskScore}/100 (${data.riskLevel})</span></div>`;
+  const cr = data.correlationRegime || {};
+  html += `<div class="kv"><span class="k">Corr Regime</span><span class="v">${esc(cr.regime || 'unknown')} (${cr.trend || 'stable'})</span></div>`;
+  html += `<div class="kv"><span class="k">Avg Correlation</span><span class="v">${cr.recentAvgCorrelation || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Systemic Risk</span><span class="v">${data.systemicRisk || 0}</span></div>`;
+  const clusters = data.clusters || [];
+  if (clusters.length > 0) {
+    html += '<div style="font-size:9px;color:#4b5563;font-weight:700;margin-top:6px;margin-bottom:2px">CLUSTERS</div>';
+    for (const c of clusters.slice(0, 3)) {
+      html += `<div class="kv"><span class="k" style="font-size:10px">${c.size} mkts</span><span class="v" style="font-size:10px">corr ${c.avgIntraCorrelation}</span></div>`;
+    }
+  }
+  if (data.recommendations?.length > 0) {
+    html += `<div style="font-size:9px;color:#f59e0b;margin-top:4px">${esc(data.recommendations[0])}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderAdaptiveRisk(data) {
+  const el = $("adaptiveRiskBlock");
+  if (!el || !data) return;
+  const k = data.kelly || {};
+  const s = data.stress || {};
+  let html = `<div class="kv"><span class="k">Kelly Fraction</span><span class="v">${k.recommendedFraction || 0} (${k.adaptiveMultiplier || 1}x)</span></div>`;
+  html += `<div class="kv"><span class="k">Portfolio Risk</span><span class="v" style="color:${s.riskLevel === 'critical' ? '#ef4444' : s.riskLevel === 'elevated' ? '#f59e0b' : '#22c55e'}">${s.portfolioRisk || 0}/100 (${s.riskLevel || 'unknown'})</span></div>`;
+  html += `<div class="kv"><span class="k">Alerts</span><span class="v">${s.alertCount || 0}</span></div>`;
+  const lim = data.limits || {};
+  html += `<div class="kv"><span class="k">Regime</span><span class="v">${esc(lim.regime || 'RANGE')}</span></div>`;
+  if (lim.global) {
+    html += `<div class="kv"><span class="k">Daily Loss Limit</span><span class="v">$${lim.global.maxDailyLoss || 0}</span></div>`;
+    html += `<div class="kv"><span class="k">Max Positions</span><span class="v">${lim.global.maxOpenPositions || 0}</span></div>`;
+  }
+  if (k.rationale?.length > 0) {
+    html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(k.rationale[0])}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderWalkForward(data) {
+  const el = $("walkForwardBlock");
+  if (!el || !data) return;
+  if (data.message) { el.innerHTML = `<div style="color:#9ca3af;font-size:11px">${esc(data.message)}</div>`; return; }
+  let html = `<div class="kv"><span class="k">Stability Score</span><span class="v" style="color:${data.stabilityScore > 70 ? '#22c55e' : data.stabilityScore > 45 ? '#f59e0b' : '#ef4444'}">${data.stabilityScore}/100 (${data.verdict})</span></div>`;
+  html += `<div class="kv"><span class="k">Windows</span><span class="v">${data.windowCount || 0} (${data.profitableWindows || 0} profitable)</span></div>`;
+  html += `<div class="kv"><span class="k">Overfit Ratio</span><span class="v">${data.avgOverfitRatio || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Train Sharpe</span><span class="v">${data.avgTrainSharpe || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Test Sharpe</span><span class="v">${data.avgTestSharpe || 0}</span></div>`;
+  html += `<div class="kv"><span class="k">Params Stable</span><span class="v">${data.parameterStable === true ? 'Yes' : data.parameterStable === false ? 'Drifting' : 'N/A'}</span></div>`;
+  if (data.recommendation) {
+    html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(data.recommendation)}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderEventImpact(data) {
+  const el = $("eventImpactBlock");
+  if (!el || !data) return;
+  let html = '';
+  const tod = data.timeOfDay || {};
+  if (tod.bestHours?.length > 0) {
+    html += `<div class="kv"><span class="k">Best Hours (UTC)</span><span class="v" style="color:#22c55e">${tod.bestHours.join(', ')}</span></div>`;
+  }
+  if (tod.worstHours?.length > 0) {
+    html += `<div class="kv"><span class="k">Worst Hours</span><span class="v" style="color:#ef4444">${tod.worstHours.join(', ')}</span></div>`;
+  }
+  const dow = data.dayOfWeek || {};
+  if (dow.bestDays?.length > 0) {
+    html += `<div class="kv"><span class="k">Best Days</span><span class="v">${dow.bestDays.join(', ')}</span></div>`;
+  }
+  if (dow.worstDays?.length > 0) {
+    html += `<div class="kv"><span class="k">Worst Days</span><span class="v">${dow.worstDays.join(', ')}</span></div>`;
+  }
+  html += `<div class="kv"><span class="k">Settlement</span><span class="v">${esc(data.settlementPattern || 'unknown')}</span></div>`;
+  html += `<div class="kv"><span class="k">Top Category</span><span class="v">${esc(data.topCategory || 'unknown')}</span></div>`;
+  const insights = data.insights || [];
+  if (insights.length > 0) {
+    html += `<div style="font-size:9px;color:#4b5563;margin-top:4px">${esc(insights[0])}</div>`;
   }
   el.innerHTML = html;
 }

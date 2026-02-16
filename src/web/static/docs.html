@@ -251,6 +251,18 @@
   <div class="section-title">Strategy Selector</div>
   <div id="strategySelectorEndpoints"></div>
 
+  <div class="section-title">Contagion Detector</div>
+  <div id="contagionEndpoints"></div>
+
+  <div class="section-title">Adaptive Risk Limits</div>
+  <div id="adaptiveRiskEndpoints"></div>
+
+  <div class="section-title">Walk-Forward Validation</div>
+  <div id="walkForwardEndpoints"></div>
+
+  <div class="section-title">Event Impact Modeler</div>
+  <div id="eventImpactEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -569,6 +581,26 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/engines/strategy-allocation?regime=RANGE&days=30", desc: "Strategy allocation: regime×strategy performance matrix, ranked by Sharpe proxy, inverse-risk-weighted allocation percentages, recommended and benched strategies", tryable: true },
     { method: "GET", path: "/api/engines/lead-lag?days=14", desc: "Cross-category lead-lag detection: hourly win-rate time series correlations between category pairs, identifies leader/follower relationships with strength ratings", tryable: true },
     { method: "GET", path: "/api/engines/rotation-recommendations?regime=RANGE&forecast=TREND", desc: "Strategy rotation recommendations: compares current vs forecast regime allocations, identifies strategy adjustments needed with increase/decrease actions and urgency level", tryable: true }
+  ],
+  contagionEndpoints: [
+    { method: "GET", path: "/api/engines/contagion?days=7", desc: "Contagion risk overview: composite risk score (0-100), correlation regime (tight/loose/breaking), market clusters, top spillover pairs, recommendations", tryable: true },
+    { method: "GET", path: "/api/engines/spillover?days=14", desc: "Spillover map: lagged correlation pairs identifying leader/follower markets with beta coefficients, systemic risk score, strong link count", tryable: true },
+    { method: "GET", path: "/api/engines/correlation-regime?days=7", desc: "Correlation regime detection: recent vs historical avg correlation, trend direction, regime classification with warnings for convergence/breakdown events", tryable: true }
+  ],
+  adaptiveRiskEndpoints: [
+    { method: "GET", path: "/api/portfolio/adaptive-risk", desc: "Adaptive risk status: dynamic Kelly fraction with rationale, regime-scaled position limits, portfolio stress score, alert count", tryable: true },
+    { method: "GET", path: "/api/portfolio/adaptive-limits?days=7", desc: "Per-market adaptive position limits: performance-based cap adjustments, regime multipliers, global limits (daily loss, max positions, drawdown)", tryable: true },
+    { method: "GET", path: "/api/portfolio/live-stress?days=14&shock=0.10", desc: "Live stress test: uniform shock, category concentration, and regime flip scenarios with expected losses, breach alerts, portfolio risk score", tryable: true },
+    { method: "GET", path: "/api/portfolio/deleveraging?maxLoss=50", desc: "Deleveraging plan: prioritized position closures to reduce exposure to target loss limit, with rationale and risk reduction estimates", tryable: true }
+  ],
+  walkForwardEndpoints: [
+    { method: "GET", path: "/api/backtest/walk-forward?days=60", desc: "Walk-forward summary: stability score (0-100), overfit ratio, train/test Sharpe comparison, parameter drift status, deployment recommendation", tryable: true },
+    { method: "GET", path: "/api/backtest/walk-forward/detailed?days=60", desc: "Detailed walk-forward: per-window train/test metrics, optimal confidence thresholds, degradation measurements, aggregate statistics, parameter drift analysis", tryable: true }
+  ],
+  eventImpactEndpoints: [
+    { method: "GET", path: "/api/engines/event-impact?days=30", desc: "Event impact overview: best/worst hours (UTC) and days, settlement proximity pattern, top category, cross-category insights", tryable: true },
+    { method: "GET", path: "/api/engines/time-profile?days=30", desc: "Hourly performance profile: per-hour win rate, avg P&L, Sharpe proxy, trade count — identifies optimal trading windows", tryable: true },
+    { method: "GET", path: "/api/engines/pattern-match?regime=RANGE&category=crypto&confidence=0.6", desc: "Historical pattern matching: finds past trades with similar regime/category/confidence and reports expected win rate, avg/median P&L, best/worst case", tryable: true }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },
