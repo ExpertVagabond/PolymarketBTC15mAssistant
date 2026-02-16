@@ -43,6 +43,9 @@ import { listAllSubscribers, grantCompAccess } from "../subscribers/manager.js";
 import { getCacheStats, cachedResponse } from "./cache.js";
 import { startTrialReminderSchedule } from "../subscribers/trial-reminders.js";
 import { startMaintenanceSchedule, getMaintenanceStatus, runMaintenance } from "../maintenance/scheduler.js";
+import { getHealthScore, getHealthHistory, getHealthTrend, checkHealthAlerts } from "../maintenance/health-monitor.js";
+import { getRecoveryLog } from "../maintenance/auto-recovery.js";
+import { getEvolutionStatus, evolveParameters, getCurrentBest } from "../engines/param-evolution.js";
 import { perfHook, perfStartHook, getPerfStats, resetPerfStats } from "./perf-tracker.js";
 import { getRiskStatus } from "../trading/risk-manager.js";
 import { getMonitorStatus } from "../trading/settlement-monitor.js";
@@ -743,6 +746,45 @@ h2{font-size:16px;color:#fff;margin-bottom:12px}
 
   app.post("/api/admin/maintenance/run", { preHandler: requireAuth }, async () => {
     return runMaintenance();
+  });
+
+  /* ── System Health & Auto-Recovery ── */
+
+  app.get("/api/system/health", async () => {
+    return getHealthScore();
+  });
+
+  app.get("/api/system/health/alerts", async () => {
+    return checkHealthAlerts();
+  });
+
+  app.get("/api/system/health/trend", async (req) => {
+    const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168);
+    return getHealthTrend(hours);
+  });
+
+  app.get("/api/system/health/history", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 288);
+    return getHealthHistory(limit);
+  });
+
+  app.get("/api/system/recovery-log", async (req) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    return getRecoveryLog(limit);
+  });
+
+  /* ── Parameter Evolution ── */
+
+  app.get("/api/trading/evolution", async () => {
+    return getEvolutionStatus();
+  });
+
+  app.get("/api/trading/evolution/best", async () => {
+    return getCurrentBest() || { params: null, message: "No evolution data yet" };
+  });
+
+  app.post("/api/trading/evolution/evolve", { preHandler: requireAuth }, async () => {
+    return evolveParameters();
   });
 
   /* ── Trading Status API ── */

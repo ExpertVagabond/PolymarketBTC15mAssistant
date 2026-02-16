@@ -10,6 +10,8 @@
 import { voidStaleSignals, purgeOldSignals } from "../signals/history.js";
 import { purgeQueue } from "../notifications/webhook-queue.js";
 import { getDb } from "../subscribers/db.js";
+import { checkHealth } from "./health-monitor.js";
+import { runAutoRecovery } from "./auto-recovery.js";
 
 let lastRun = null;
 let runCount = 0;
@@ -87,6 +89,19 @@ export function startMaintenanceSchedule() {
   const interval = setInterval(() => {
     try { runMaintenance(); } catch (err) { console.error("[maintenance]", err.message); }
   }, 60 * 60 * 1000);
+
+  // Health check + auto-recovery every 5 minutes
+  setInterval(() => {
+    try {
+      const health = checkHealth();
+      if (health.score < 70) {
+        const recovery = runAutoRecovery();
+        if (recovery.actions && recovery.actions.length > 0) {
+          console.log(`[auto-recovery] Score ${health.score}: ${recovery.actions.map(a => a.action).join(", ")}`);
+        }
+      }
+    } catch (err) { console.error("[auto-recovery]", err.message); }
+  }, 5 * 60 * 1000);
 
   return interval;
 }

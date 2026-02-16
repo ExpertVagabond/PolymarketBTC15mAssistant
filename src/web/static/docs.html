@@ -149,6 +149,12 @@
   <div class="section-title">A/B Experiments</div>
   <div id="experimentEndpoints"></div>
 
+  <div class="section-title">System Health</div>
+  <div id="systemHealthEndpoints"></div>
+
+  <div class="section-title">Parameter Evolution</div>
+  <div id="paramEvolutionEndpoints"></div>
+
   <div class="section-title">Programmatic API (API Key Required)</div>
   <div id="v1Endpoints"></div>
 
@@ -315,6 +321,18 @@ const ENDPOINTS = {
     { method: "GET", path: "/api/experiments/:id", desc: "Detailed experiment stats: per-arm win rates, P&L, Thompson sampling probability of being best" },
     { method: "POST", path: "/api/experiments", desc: "Create experiment. Body: { name, arms: ['control', 'variant_a'] } (auth required)" },
     { method: "POST", path: "/api/experiments/:id/promote", desc: "Manually promote a winner. Body: { arm } (auth required)" }
+  ],
+  systemHealthEndpoints: [
+    { method: "GET", path: "/api/system/health", desc: "Composite health score (0-100) with per-component breakdown: memory, errors, executions, freshness, database", tryable: true },
+    { method: "GET", path: "/api/system/health/alerts", desc: "Active health alerts with severity level (healthy/degraded/unhealthy/critical)", tryable: true },
+    { method: "GET", path: "/api/system/health/trend?hours=24", desc: "Health score trend over time from persisted snapshots", tryable: true },
+    { method: "GET", path: "/api/system/health/history?limit=50", desc: "In-memory health history ring buffer (5-min intervals)", tryable: true },
+    { method: "GET", path: "/api/system/recovery-log?limit=50", desc: "Auto-recovery action log: maintenance runs, cache clears, trading pauses triggered by health drops", tryable: true }
+  ],
+  paramEvolutionEndpoints: [
+    { method: "GET", path: "/api/trading/evolution", desc: "Parameter evolution status: generation, population size, best-ever params and fitness", tryable: true },
+    { method: "GET", path: "/api/trading/evolution/best", desc: "Current best evolved parameter set (confidence, edge, sizing, quality gate)", tryable: true },
+    { method: "POST", path: "/api/trading/evolution/evolve", desc: "Manually trigger one generation of parameter evolution (auth required)" }
   ],
   v1Endpoints: [
     { method: "GET", path: "/api/v1/signals", desc: "Recent signals. Supports &before=ID cursor (requires X-API-Key header)" },

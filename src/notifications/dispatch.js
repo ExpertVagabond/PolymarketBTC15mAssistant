@@ -14,6 +14,7 @@
 import { getDb } from "../subscribers/db.js";
 import { enqueueWebhook } from "./webhook-queue.js";
 import { recordDelivery } from "./delivery-audit.js";
+import { scorePriority, shouldBypassThrottle } from "./priority.js";
 
 let stmts = null;
 
@@ -234,11 +235,14 @@ export async function dispatchEmailAlerts(tick, resendClient) {
       if (cats.length > 0 && !cats.includes(category)) continue;
     }
 
-    // Throttle check
+    // Priority-aware throttle check
     const maxPerHour = pref.max_alerts_per_hour ?? DEFAULT_MAX_PER_HOUR;
-    if (isThrottled(pref.email, maxPerHour)) {
+    const priorityResult = scorePriority("signal.enter", tick);
+    const throttle = getThrottle(pref.email);
+
+    if (!shouldBypassThrottle(priorityResult.label, throttle.count, maxPerHour)) {
       queueForDigest(pref.email, tick);
-      recordDelivery({ email: pref.email, channel: "email", signalId: tick.signalId, status: "throttled" });
+      recordDelivery({ email: pref.email, channel: "email", signalId: tick.signalId, status: "throttled", priority: priorityResult.label });
       continue;
     }
 
@@ -368,5 +372,6 @@ const EVENT_MAP = {
 export function onTradeAuditEvent(auditEventType, data) {
   if (!NOTIFY_EVENTS.has(auditEventType)) return;
   const webhookEvent = EVENT_MAP[auditEventType] || `trade.${auditEventType.toLowerCase()}`;
-  dispatchTradeEvent(webhookEvent, data).catch(() => {});
+  const priority = scorePriority(webhookEvent, data);
+  dispatchTradeEvent(webhookEvent, { ...data, _priority: priority.label, _priorityReason: priority.reason }).catch(() => {});
 }

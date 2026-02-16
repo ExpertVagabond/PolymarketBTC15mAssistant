@@ -250,6 +250,24 @@
       <div id="execQualityBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
     </div>
 
+    <!-- System Health -->
+    <div class="card">
+      <div class="card-title">System Health Score</div>
+      <div id="healthScoreBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Auto-Recovery Log -->
+    <div class="card">
+      <div class="card-title">Auto-Recovery</div>
+      <div id="recoveryBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
+    <!-- Parameter Evolution -->
+    <div class="card">
+      <div class="card-title">Parameter Evolution</div>
+      <div id="evolutionBlock"><div style="color:#4b5563;font-size:12px">Loading...</div></div>
+    </div>
+
     <!-- Hourly Win Rates -->
     <div class="card wide">
       <div class="card-title">Hourly Win Rates (UTC)</div>
@@ -313,7 +331,7 @@ async function loadAdmin() {
     if (!me.email) { showAuthWall(); return; }
 
     // Load all data in parallel
-    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData] = await Promise.all([
+    const [health, admin, trends, drift, whQueue, delivery, cacheStats, perf, maint, trading, openExecs, pnl, tradingConfig, analytics, hourlyStats, filterStatsData, auditEvents, attribution, categoryWeights, regimeAnalytics, anomalyData, slippageData, correlationData, experimentsData, execQualityData, healthScoreData, recoveryData, evolutionData] = await Promise.all([
       fetch("/health/detailed").then(r => r.json()),
       fetch("/api/admin/stats").then(r => r.json()).catch(() => null),
       fetch("/api/logs/trends?days=7").then(r => r.json()).catch(() => null),
@@ -338,7 +356,10 @@ async function loadAdmin() {
       fetch("/api/trading/slippage?days=30").then(r => r.json()).catch(() => null),
       fetch("/api/portfolio/open-correlations").then(r => r.json()).catch(() => null),
       fetch("/api/experiments").then(r => r.json()).catch(() => null),
-      fetch("/api/trading/execution-quality?days=30").then(r => r.json()).catch(() => null)
+      fetch("/api/trading/execution-quality?days=30").then(r => r.json()).catch(() => null),
+      fetch("/api/system/health").then(r => r.json()).catch(() => null),
+      fetch("/api/system/recovery-log?limit=10").then(r => r.json()).catch(() => null),
+      fetch("/api/trading/evolution").then(r => r.json()).catch(() => null)
     ]);
 
     renderHealth(health);
@@ -364,6 +385,9 @@ async function loadAdmin() {
     if (correlationData) renderCorrelation(correlationData);
     if (experimentsData) renderExperiments(experimentsData);
     if (execQualityData) renderExecQuality(execQualityData);
+    if (healthScoreData) renderHealthScore(healthScoreData);
+    if (recoveryData) renderRecovery(recoveryData);
+    if (evolutionData) renderEvolution(evolutionData);
     loadSubscribers();
 
     $("lastRefresh").textContent = "Updated " + new Date().toLocaleTimeString();
@@ -1199,6 +1223,81 @@ function renderExecQuality(data) {
 
   if (data.fillStats) {
     html += `<div class="kv"><span class="k">Filled / Failed</span><span class="v">${data.fillStats.filled || 0} / ${data.fillStats.failed || 0}</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderHealthScore(data) {
+  const el = $("healthScoreBlock");
+  if (!el) return;
+  if (!data || data.score == null) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No health data</div>';
+    return;
+  }
+
+  const sc = data.score;
+  const level = sc >= 80 ? "healthy" : sc >= 50 ? "degraded" : sc >= 30 ? "unhealthy" : "critical";
+  const color = sc >= 80 ? "green" : sc >= 50 ? "amber" : "red";
+  let html = `<div class="kv"><span class="k">Score</span><span class="v ${color}" style="font-size:16px;font-weight:700">${sc}/100</span></div>`;
+  html += `<div class="kv"><span class="k">Status</span><span class="v ${color}">${level}</span></div>`;
+
+  if (data.components) {
+    const c = data.components;
+    if (c.memory) html += `<div class="kv"><span class="k">Memory</span><span class="v">${c.memory.heapUsedMB}/${c.memory.heapTotalMB}MB (${c.memory.usagePct}%)</span></div>`;
+    if (c.errors) html += `<div class="kv"><span class="k">Error rate</span><span class="v ${c.errors.score < 50 ? "red" : ""}">${(c.errors.errorRate * 100).toFixed(1)}%</span></div>`;
+    if (c.freshness) html += `<div class="kv"><span class="k">Data fresh</span><span class="v ${c.freshness.isStale ? "red" : "green"}">${c.freshness.isStale ? "STALE" : "OK"}</span></div>`;
+  }
+
+  if (data.alerts && data.alerts.length > 0) {
+    html += `<div style="margin-top:8px;font-size:11px;color:#f87171">${data.alerts.map(a => "⚠ " + a).join("<br>")}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRecovery(data) {
+  const el = $("recoveryBlock");
+  if (!el) return;
+  if (!data || !data.entries || data.entries.length === 0) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No recovery actions taken</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Total recoveries</span><span class="v amber">${data.totalRecoveries || 0}</span></div>`;
+  if (data.lastRecoveryAt) {
+    html += `<div class="kv"><span class="k">Last recovery</span><span class="v">${new Date(data.lastRecoveryAt).toLocaleTimeString()}</span></div>`;
+  }
+
+  const recent = data.entries.slice(0, 5);
+  for (const e of recent) {
+    const color = e.success ? "green" : "red";
+    html += `<div class="kv"><span class="k" style="font-size:10px">${e.action}</span><span class="v ${color}" style="font-size:10px">score ${e.health_score} | ${e.success ? "ok" : "fail"}</span></div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderEvolution(data) {
+  const el = $("evolutionBlock");
+  if (!el) return;
+  if (!data) {
+    el.innerHTML = '<div style="color:#4b5563;font-size:12px">No evolution data</div>';
+    return;
+  }
+
+  let html = `<div class="kv"><span class="k">Generation</span><span class="v blue">${data.generation}</span></div>`;
+  html += `<div class="kv"><span class="k">Population</span><span class="v">${data.populationSize}</span></div>`;
+
+  if (data.bestEver) {
+    const p = data.bestEver.params;
+    const f = data.bestEver.fitness;
+    html += `<div class="kv"><span class="k">Best fitness</span><span class="v green">${f?.score ?? "-"}</span></div>`;
+    html += `<div class="kv"><span class="k">Best conf</span><span class="v">${p.minConfidence}</span></div>`;
+    html += `<div class="kv"><span class="k">Best edge</span><span class="v">${(p.minEdge * 100).toFixed(1)}%</span></div>`;
+    html += `<div class="kv"><span class="k">Best sizing</span><span class="v">${p.sizingMultiplier}x</span></div>`;
+  } else {
+    html += '<div style="color:#4b5563;font-size:11px;margin-top:6px">Waiting for trade data to evolve</div>';
   }
 
   el.innerHTML = html;
